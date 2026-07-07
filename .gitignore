@@ -1,0 +1,6 @@
+# Excel 임시 잠금 파일
+~$*
+
+# OS
+.DS_Store
+Thumbs.db
