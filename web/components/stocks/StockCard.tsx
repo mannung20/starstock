@@ -1,0 +1,87 @@
+import { Card, CardContent } from "@/components/ui/card";
+import { StatusSignal } from "./StatusSignal";
+import { PriceChange } from "./PriceChange";
+import { EnergyGauge } from "./EnergyGauge";
+import {
+  upEnergy,
+  remainingUpPercent,
+  downRiskPercent,
+  recommendDays,
+} from "@/lib/stock-calc";
+import { formatKRW, formatPercent } from "@/lib/utils";
+import type { StockRow } from "@/lib/types";
+import type { ViewerRole } from "@/lib/stock-slots";
+
+/** 목표가/손절가 한 줄 (guest=🔒, free=금액, vip=금액+%) */
+function PriceTargets({ stock, role }: { stock: StockRow; role: ViewerRole }) {
+  const isVip = role === "vip";
+  const rem = remainingUpPercent(stock.current_price, stock.target_price);
+  const risk = downRiskPercent(stock.current_price, stock.stop_price);
+
+  const cell = (label: string, value: number | null, pct: number | null, tone: string) => (
+    <div className="flex items-center justify-between text-sm">
+      <span className="text-muted-foreground">{label}</span>
+      {value == null ? (
+        <span aria-label="잠김">🔒</span>
+      ) : (
+        <span className="tabular-nums font-medium">
+          {formatKRW(value)}원
+          {isVip && pct != null && <span className={`ml-1 ${tone}`}>({formatPercent(pct)})</span>}
+        </span>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-1 border-t pt-2">
+      {cell("목표가", stock.target_price, rem, "text-up")}
+      {cell("손절가", stock.stop_price, risk, "text-down")}
+    </div>
+  );
+}
+
+export function StockCard({ stock, role }: { stock: StockRow; role: ViewerRole }) {
+  const isVip = role === "vip";
+  const energy = isVip ? upEnergy(stock) : null;
+
+  return (
+    <Card className="transition-shadow hover:shadow-md">
+      <CardContent className="space-y-2 p-4">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm font-bold text-muted-foreground">#{stock.rank}</span>
+            <span className="text-base font-bold">{stock.stock_name}</span>
+          </div>
+          <PriceChange current={stock.current_price} open={stock.open_price} showPrice={false} />
+        </div>
+
+        <div className="text-lg font-bold tabular-nums">{formatKRW(stock.current_price)}원</div>
+
+        {isVip && (
+          <div className="flex flex-wrap gap-x-3 text-xs text-muted-foreground tabular-nums">
+            <span>시가 {formatKRW(stock.open_price)}</span>
+            <span>고가 {formatKRW(stock.high_price)}</span>
+            <span>저가 {formatKRW(stock.low_price)}</span>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between">
+          <StatusSignal status={stock.status} />
+          {role !== "guest" && (
+            <span className="text-xs text-muted-foreground">추천 {recommendDays(stock.entry_date)}일째</span>
+          )}
+        </div>
+
+        <PriceTargets stock={stock} role={role} />
+
+        {isVip && energy != null && (
+          <div className="border-t pt-2">
+            <EnergyGauge pct={energy} />
+          </div>
+        )}
+
+        {stock.memo && <p className="border-t pt-2 text-sm text-muted-foreground">{stock.memo}</p>}
+      </CardContent>
+    </Card>
+  );
+}

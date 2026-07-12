@@ -1,6 +1,32 @@
-# Excel 임시 잠금 파일
+# ===== 비밀 값 (절대 커밋 금지) =====
+.env
+.env.local
+.env*.local
+uploader/config.json
+uploader/tracker.json
+uploader/starstock-tracker.json
+
+# ===== Next.js / Node =====
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+web/next-env.d.ts
+node_modules/
+.vercel/
+
+# ===== Python =====
+__pycache__/
+*.pyc
+uploader/uploader.log
+
+# ===== Excel 임시 잠금 파일 =====
 ~$*
 
-# OS
+# ===== 내부 작업노트/로컬 스크립트 (커밋 제외, 루트만) =====
+/*.txt
+/*.bat
+
+# ===== OS =====
 .DS_Store
 Thumbs.db
