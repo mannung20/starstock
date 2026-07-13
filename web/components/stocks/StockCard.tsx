@@ -36,6 +36,17 @@ function PriceTargets({ stock, role }: { stock: StockRow; role: ViewerRole }) {
     <div className="space-y-1 border-t pt-2">
       {cell("목표가", stock.target_price, rem, "text-up")}
       {cell("손절가", stock.stop_price, risk, "text-down")}
+      {/* 매수기준가(=전일고가): guest=🔒, free/vip=확정 시 값·미확정 시 빈칸 */}
+      <div className="flex items-center justify-between text-sm">
+        <span className="text-muted-foreground">매수기준가</span>
+        {role === "guest" ? (
+          <span aria-label="잠김">🔒</span>
+        ) : (
+          <span className="tabular-nums font-medium">
+            {stock.entry_confirmed ? `${formatKRW(stock.entry_price)}원` : ""}
+          </span>
+        )}
+      </div>
     </div>
   );
 }

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { StockRow, NoticeRow, UserRole, StockHistoryRow } from "@/lib/types";
@@ -11,18 +12,24 @@ export interface StocksPayload {
   server_time: string;
 }
 
-/** 현재 요청자의 등급 판별 (세션 없으면 guest). */
-export async function getViewer(): Promise<{ userId: string | null; email: string | null; role: ViewerRole }> {
-  const supabase = createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { userId: null, email: null, role: "guest" };
+/**
+ * 현재 요청자의 등급 판별 (세션 없으면 guest).
+ * React cache()로 감싸 동일 요청 렌더 내 중복 호출을 1회로 dedupe
+ * (page.tsx 와 getStocksPayload 가 각각 호출해도 auth.getUser/profiles 왕복 1회).
+ */
+export const getViewer = cache(
+  async (): Promise<{ userId: string | null; email: string | null; role: ViewerRole }> => {
+    const supabase = createClient();
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) return { userId: null, email: null, role: "guest" };
 
-  const { data } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-  const role = ((data as { role: UserRole } | null)?.role) ?? "free";
-  return { userId: user.id, email: user.email ?? null, role };
-}
+    const { data } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+    const role = ((data as { role: UserRole } | null)?.role) ?? "free";
+    return { userId: user.id, email: user.email ?? null, role };
+  },
+);
 
 /** GET /api/stocks 와 홈 SSR 이 공유하는 등급별 종목 페이로드. */
 export async function getStocksPayload(): Promise<StocksPayload> {
@@ -37,6 +44,7 @@ export async function getStocksPayload(): Promise<StocksPayload> {
       ...s,
       target_price: null as unknown as number,
       stop_price: null as unknown as number,
+      entry_price: null as unknown as number,   // 매수기준가: guest 에겐 payload 에서도 제거(화면 🔒 + 유출 차단)
     }));
   }
 

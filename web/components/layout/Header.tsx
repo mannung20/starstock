@@ -33,7 +33,8 @@ export function Header({
   initialIsAdmin?: boolean;
 }) {
   const router = useRouter();
-  const supabase = createClient();
+  // createClient()를 렌더마다 새로 만들면 [supabase] effect가 무한 재구독됨 → 최초 1회만 생성
+  const [supabase] = useState(() => createClient());
   const [role, setRole] = useState<UserRole | "guest">(initialRole);
   const [email, setEmail] = useState<string | null>(initialEmail);
   const [isAdmin, setIsAdmin] = useState<boolean>(initialIsAdmin);

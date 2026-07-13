@@ -15,8 +15,8 @@ import type { Slot, ViewerRole } from "@/lib/stock-slots";
 
 function headers(role: ViewerRole): string[] {
   if (role === "vip")
-    return ["순위", "종목명", "현재가", "시가", "고가", "저가", "상태", "목표가", "손절가", "상승에너지", "투자포인트", "추천일"];
-  const base = ["순위", "종목명", "현재가", "상태", "목표가", "손절가", "투자포인트"];
+    return ["순위", "종목명", "현재가", "시가", "고가", "저가", "상태", "목표가", "손절가", "매수기준가", "상승에너지", "투자포인트", "추천일"];
+  const base = ["순위", "종목명", "현재가", "상태", "목표가", "손절가", "매수기준가", "투자포인트"];
   if (role === "free") base.push("추천일");
   return base;
 }
@@ -50,6 +50,14 @@ function RealRow({ stock, role }: { stock: StockRow; role: ViewerRole }) {
       <td className="px-3 py-2"><StatusSignal status={stock.status} /></td>
       <td className="px-3 py-2">{priceCell(stock.target_price, rem, isVip, "text-up")}</td>
       <td className="px-3 py-2">{priceCell(stock.stop_price, risk, isVip, "text-down")}</td>
+      {/* 매수기준가(=전일고가): guest=🔒, free/vip=확정 시 값·미확정 시 빈칸 */}
+      <td className="px-3 py-2">
+        {role === "guest" ? (
+          <span aria-label="잠김">🔒</span>
+        ) : (
+          <span className="tabular-nums">{stock.entry_confirmed ? formatKRW(stock.entry_price) : ""}</span>
+        )}
+      </td>
       {isVip && (
         <td className="px-3 py-2 tabular-nums">
           {energy != null ? `${Math.round(energy)}% ${energyBand(energy).badge}` : "-"}
