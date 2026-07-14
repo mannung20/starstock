@@ -56,14 +56,18 @@ export function StockCard({ stock, role }: { stock: StockRow; role: ViewerRole }
   const energy = isVip ? upEnergy(stock) : null;
 
   return (
-    <Card className="transition-shadow hover:shadow-md">
+    <Card
+      className={`transition-shadow hover:shadow-md ${
+        stock.status === "buy" ? "animate-pulse border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30" : ""
+      }`}
+    >
       <CardContent className="space-y-2 p-4">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-bold text-muted-foreground">#{stock.rank}</span>
             <span className="text-base font-bold">{stock.stock_name}</span>
           </div>
-          <PriceChange current={stock.current_price} open={stock.open_price} showPrice={false} />
+          <PriceChange current={stock.current_price} open={stock.open_price} changeRate={stock.change_rate} showPrice={false} />
         </div>
 
         <div className="text-lg font-bold tabular-nums">{formatKRW(stock.current_price)}원</div>

@@ -6,13 +6,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-type Tab = "basic" | "footer" | "nav" | "ops" | "referral";
+type Tab = "basic" | "footer" | "nav" | "ops" | "referral" | "alert";
 const TABS: { key: Tab; label: string }[] = [
   { key: "basic", label: "기본정보" },
   { key: "footer", label: "하단정보" },
   { key: "nav", label: "네비게이션" },
   { key: "ops", label: "운영설정" },
   { key: "referral", label: "추천설정" },
+  { key: "alert", label: "매수알림" },
 ];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -31,6 +32,7 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
   const [c, setC] = useState<Record<string, string>>(config);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [imgPreview, setImgPreview] = useState(false); // 매수알림 이미지 미리보기 토글
 
   const set = (k: string, v: string) => setC((p) => ({ ...p, [k]: v }));
   const val = (k: string, d = "") => c[k] ?? d;
@@ -75,7 +77,7 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
 
   return (
     <div className="space-y-4">
-      <div className="flex gap-1 border-b">
+      <div className="flex flex-wrap gap-1 border-b">
         {TABS.map((t) => (
           <button
             key={t.key}
@@ -233,6 +235,77 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
               </div>
 
               <Button onClick={saveReferral} disabled={saving}>저장</Button>
+            </>
+          )}
+
+          {tab === "alert" && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                종목 상태가 🟢<b>매수적기</b>일 때 홈 화면에 알림을 표시합니다. (해당 종목행은 항상 강조 표시)
+              </p>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={bool("buy_alert_image_enabled")} onChange={(e) => set("buy_alert_image_enabled", String(e.target.checked))} />
+                  이미지 표시 허용
+                </label>
+                <Field label="알림 이미지 URL">
+                  <div className="flex items-center gap-2">
+                    <input className={inputCls} placeholder="https://.../alert.png" value={val("buy_alert_image_url")} onChange={(e) => set("buy_alert_image_url", e.target.value)} />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!val("buy_alert_image_url")}
+                      onClick={() => setImgPreview((v) => !v)}
+                    >
+                      🖼️ 미리보기
+                    </Button>
+                  </div>
+                </Field>
+                {imgPreview && val("buy_alert_image_url") && (
+                  <div>
+                    <p className="mb-1 text-xs text-muted-foreground">이미지 미리보기</p>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={val("buy_alert_image_url")} alt="미리보기" className="max-h-32 rounded-md border" />
+                  </div>
+                )}
+                <Field label="알림화면 표시 시간 (자동 사라짐)">
+                  <div className="flex flex-wrap gap-3 text-sm">
+                    {[["15", "15초"], ["30", "30초"], ["45", "45초"], ["60", "1분"]].map(([v, l]) => (
+                      <label key={v} className="flex items-center gap-1">
+                        <input type="radio" checked={val("buy_alert_image_duration", "30") === v} onChange={() => set("buy_alert_image_duration", v)} /> {l}
+                      </label>
+                    ))}
+                  </div>
+                </Field>
+              </div>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <label className="flex items-center gap-2 text-sm font-medium">
+                  <input type="checkbox" checked={bool("buy_alert_sound_enabled")} onChange={(e) => set("buy_alert_sound_enabled", String(e.target.checked))} />
+                  사운드 출력 허용
+                </label>
+                <Field label="알림 사운드 URL (mp3/wav)">
+                  <div className="flex items-center gap-2">
+                    <input className={inputCls} placeholder="https://.../beep.mp3" value={val("buy_alert_sound_url")} onChange={(e) => set("buy_alert_sound_url", e.target.value)} />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={!val("buy_alert_sound_url")}
+                      onClick={() => { new Audio(val("buy_alert_sound_url")).play().catch(() => alert("재생 실패: URL 또는 형식을 확인하세요.")); }}
+                    >
+                      ▶ 미리듣기
+                    </Button>
+                  </div>
+                </Field>
+                <p className="text-xs text-muted-foreground">
+                  ※ 브라우저 정책상 사용자가 홈에서 <b>🔔 소리 켜기</b>를 누른 뒤부터 재생됩니다(자동재생 차단).
+                </p>
+              </div>
+
+              <Button onClick={() => save(["buy_alert_image_enabled", "buy_alert_image_url", "buy_alert_image_duration", "buy_alert_sound_enabled", "buy_alert_sound_url"])} disabled={saving}>저장</Button>
             </>
           )}
 

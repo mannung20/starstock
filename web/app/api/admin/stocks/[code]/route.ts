@@ -7,11 +7,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * PATCH /api/admin/stocks/[rank] — 종목 인라인 편집 (비상용, PRD 7-5)
- * body: { status?, memo?, target_price?, stop_price? }
+ * PATCH /api/admin/stocks/[code] — 종목 인라인 편집 (비상용)
+ * [code] = stock_code (v3.1 식별키). body: { status?, memo?, target_price?, stop_price? }
  * ⚠️ 가격·종목코드는 엑셀 업로드가 덮어씀. status/memo/target/stop 은 유지됨.
  */
-export async function PATCH(req: NextRequest, { params }: { params: { rank: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: { code: string } }) {
   const ctx = await getAdminContext();
   if (!ctx.isAdmin) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
@@ -33,9 +33,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { rank: stri
   if (body.stop_price !== undefined) patch.stop_price = Math.max(0, Math.trunc(body.stop_price));
 
   const admin = createAdminClient();
-  const { error } = await admin.from("stocks").update(patch).eq("rank", Number(params.rank));
+  const { error } = await admin.from("stocks").update(patch).eq("stock_code", params.code);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await logAdminAction(ctx.userId, `종목 rank${params.rank} 수동편집`);
+  await logAdminAction(ctx.userId, `종목 ${params.code} 수동편집`);
   return NextResponse.json({ success: true });
 }

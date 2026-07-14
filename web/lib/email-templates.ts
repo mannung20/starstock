@@ -51,6 +51,49 @@ export function gradeChangeEmail(opts: { name?: string; newRole: string; endDate
   };
 }
 
+/** HTML 특수문자 이스케이프 (사용자 입력을 본문에 넣기 전 필수). */
+function esc(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+/** 기능개선요청 → 관리자 알림 메일 (사용자 입력 이스케이프 처리 내장). */
+export function featureRequestEmail(opts: {
+  category: string;
+  title: string;
+  content: string;
+  requesterEmail: string;
+  requesterRole: string;
+  contactEmail?: string;
+  contact?: string;
+  submittedAtKst: string;
+}): EmailContent {
+  const rows = [
+    ["분류", esc(opts.category)],
+    ["제목", esc(opts.title)],
+    ["요청자", `${esc(opts.requesterEmail)} (${esc(opts.requesterRole)})`],
+    ...(opts.contactEmail ? [["회신 이메일", esc(opts.contactEmail)]] : []),
+    ...(opts.contact ? [["연락처", esc(opts.contact)]] : []),
+    ["접수시각", esc(opts.submittedAtKst)],
+  ]
+    .map(
+      ([k, v]) =>
+        `<tr><td style="padding:4px 12px 4px 0;color:#71717a;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:4px 0;font-weight:600">${v}</td></tr>`
+    )
+    .join("");
+  const body = `
+    <table style="width:100%;border-collapse:collapse;margin-bottom:12px">${rows}</table>
+    <div style="margin-top:8px;padding:12px;background:#f4f4f5;border-radius:8px;white-space:pre-wrap;word-break:break-word">${esc(opts.content)}</div>`;
+  return {
+    subject: `[${SITE}][기능개선요청] ${opts.category} - ${opts.title}`.replace(/[\r\n]+/g, " "),
+    html: layout("새 기능개선요청이 접수되었습니다", body),
+  };
+}
+
 /** 추천 보상 지급 알림 (p4-6) */
 export function referralRewardEmail(opts: { name?: string; rewardDays: number; reason: string; siteUrl: string }): EmailContent {
   const who = opts.name ? `${opts.name}님` : "회원님";

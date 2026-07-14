@@ -5,6 +5,7 @@ import { Footer } from "@/components/layout/Footer";
 import { getViewer, getNotice } from "@/lib/server-data";
 import { getAdminContext } from "@/lib/admin";
 import type { NoticeCategory } from "@/lib/types";
+import { MaintenanceGate } from "@/components/layout/MaintenanceGate";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +21,9 @@ function ymd(iso: string): string {
 }
 
 export default async function NoticeDetailPage({ params }: { params: { id: string } }) {
+  const gate = await MaintenanceGate();
+  if (gate) return gate;
+
   const id = Number(params.id);
   if (!Number.isInteger(id) || id <= 0) notFound();
 

@@ -18,8 +18,8 @@ export type ConfigRole = "guest" | "free" | "vip";
 
 export type StockRow = {
   id: number;
-  rank: number; // 1~10 UNIQUE
-  stock_code: string;
+  rank: number; // 1~10 (등락률 동적순위, v3.1부터 UNIQUE 아님)
+  stock_code: string; // ★식별키(UNIQUE)
   stock_name: string;
   current_price: number;
   open_price: number;
@@ -29,10 +29,11 @@ export type StockRow = {
   stop_price: number;
   entry_price: number;
   entry_confirmed: boolean;
+  change_rate: number; // 등락률(%) numeric(6,2) — 엑셀 직접 수신
   status: StockStatus;
   memo: string | null;
   is_visible: boolean;
-  entry_date: string; // date
+  entry_date: string; // date (유지·미사용)
   updated_at: string; // timestamptz
 }
 
@@ -133,6 +134,19 @@ export type StockHistoryRow = {
   created_at: string;
 }
 
+// 08_buy_signals.sql — 매수신호 발생 이력 (status→'buy' 전환 시 트리거 자동 기록)
+export type BuySignalRow = {
+  id: number;
+  stock_code: string;
+  stock_name: string;
+  entry_price: number;   // 발생 당시 매수기준가(전일고가)
+  signal_price: number;  // 발생 당시 현재가
+  rank: number | null;   // 발생 당시 순위(참고)
+  signaled_at: string;   // timestamptz
+  trade_date: string;    // date (KST 거래일)
+  note: string | null;   // '[replay]' 재생신호 표식, 실운영=null
+}
+
 export type RewardType = "milestone" | "repeat" | "referee" | "manual";
 
 export type ReferralLogRow = {
@@ -153,7 +167,7 @@ export type ReferralRewardRow = {
   rewarded_at: string;
 }
 
-export type EmailKind = "grade_change" | "referral_reward" | "vip_expiry" | "test" | "other";
+export type EmailKind = "grade_change" | "referral_reward" | "vip_expiry" | "feedback" | "test" | "other";
 export type EmailStatus = "sent" | "skipped" | "failed";
 // 06_email_logs.sql — 이메일 발송 로그 (관리자 확인용, 발송 본문 전문 저장)
 export type EmailLogRow = {
@@ -188,7 +202,7 @@ export type Database = {
       stocks: TableShape<
         StockRow,
         | "id" | "updated_at" | "current_price" | "open_price" | "high_price" | "low_price"
-        | "target_price" | "stop_price" | "entry_price" | "entry_confirmed" | "status"
+        | "target_price" | "stop_price" | "entry_price" | "entry_confirmed" | "change_rate" | "status"
         | "is_visible" | "entry_date"
       >;
       profiles: TableShape<ProfileRow, "role" | "is_banned" | "joined_at" | "email_verified" | "email_notify">;
@@ -208,6 +222,7 @@ export type Database = {
       referral_rewards: TableShape<ReferralRewardRow, "id" | "rewarded_at" | "reward_type">;
       stock_history: TableShape<StockHistoryRow, "id" | "created_at">;
       email_logs: TableShape<EmailLogRow, "id" | "created_at" | "kind">;
+      buy_signals: TableShape<BuySignalRow, "id" | "signaled_at" | "trade_date" | "entry_price" | "signal_price">;
     };
     Views: { [_ in never]: never };
     Functions: {

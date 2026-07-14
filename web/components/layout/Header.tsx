@@ -14,6 +14,7 @@ const NAV = [
   { href: "/referral", label: "추천하기" },
   { href: "/board", label: "게시판" },
   { href: "/history", label: "수익률 현황" },
+  { href: "/feedback", label: "기능개선요청" },
 ];
 
 function GradeBadge({ role }: { role: UserRole | "guest" }) {

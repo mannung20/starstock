@@ -73,64 +73,58 @@ export async function POST(req: NextRequest) {
   }
 
   const supabase = createAdminClient();
-  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
   try {
-    // 5) 기존 종목 조회 (stock_code 변경 감지 → entry_date 갱신 판단)
-    const { data: existing, error: fetchErr } = await supabase
-      .from("stocks")
-      .select("rank, stock_code, entry_date");
-    if (fetchErr) throw fetchErr;
+    // 5) 업로드 종목 준비 (빈 stock_code 마커는 제외 — v3.1 종목모델)
+    const visibleRows = stocks.filter(
+      (s) => !s.hide && s.stock_code.trim() !== ""
+    );
+    const uploadedCodes = new Set(visibleRows.map((s) => s.stock_code));
 
-    const existingRows = (existing ?? []) as {
-      rank: number;
-      stock_code: string;
-      entry_date: string;
-    }[];
-    const existingByRank = new Map(existingRows.map((r) => [r.rank, r]));
-
-    const visibleRows = stocks.filter((s) => !s.hide);
-    const hideRanks = stocks.filter((s) => s.hide).map((s) => s.rank);
-
-    // 6) 표시 종목 Upsert (onConflict: rank)
+    // 6) 종목 Upsert (onConflict: stock_code)
+    //    entry_date 미설정 → 신규=DB 기본값(current_date), 기존=보존(미포함 컬럼 불변).
     if (visibleRows.length > 0) {
-      const upsertRows = visibleRows.map((s) => {
-        const prev = existingByRank.get(s.rank);
-        // stock_code 변경 시 entry_date=오늘, 동일하면 기존 유지
-        const entryDate =
-          prev && prev.stock_code === s.stock_code ? prev.entry_date : today;
-        return {
-          rank: s.rank,
-          stock_code: s.stock_code,
-          stock_name: s.stock_name,
-          current_price: s.current_price,
-          open_price: s.open_price,
-          high_price: s.high_price,
-          low_price: s.low_price,
-          target_price: s.target_price,
-          stop_price: s.stop_price,
-          entry_price: s.entry_price,
-          entry_confirmed: s.entry_confirmed,
-          status: s.status,
-          memo: s.memo,
-          is_visible: true,
-          entry_date: entryDate,
-          updated_at: new Date().toISOString(),
-        };
-      });
+      const upsertRows = visibleRows.map((s) => ({
+        rank: s.rank,
+        stock_code: s.stock_code,
+        stock_name: s.stock_name,
+        current_price: s.current_price,
+        open_price: s.open_price,
+        high_price: s.high_price,
+        low_price: s.low_price,
+        target_price: s.target_price,
+        stop_price: s.stop_price,
+        entry_price: s.entry_price,
+        entry_confirmed: s.entry_confirmed,
+        change_rate: s.change_rate,
+        status: s.status,
+        memo: s.memo,
+        is_visible: true,
+        updated_at: new Date().toISOString(),
+      }));
 
       const { error: upsertErr } = await supabase
         .from("stocks")
-        .upsert(upsertRows, { onConflict: "rank" });
+        .upsert(upsertRows, { onConflict: "stock_code" });
       if (upsertErr) throw upsertErr;
     }
 
-    // 7) 빈 rank → is_visible=false (DELETE 금지, 데이터 보존)
-    if (hideRanks.length > 0) {
+    // 7) 이번 업로드에 없는 기존 visible 종목 → is_visible=false (DELETE 금지, 보존)
+    const { data: curVisible, error: visErr } = await supabase
+      .from("stocks")
+      .select("stock_code")
+      .eq("is_visible", true);
+    if (visErr) throw visErr;
+
+    const toHide = (curVisible ?? [])
+      .map((r) => (r as { stock_code: string }).stock_code)
+      .filter((code) => code && !uploadedCodes.has(code));
+
+    if (toHide.length > 0) {
       const { error: hideErr } = await supabase
         .from("stocks")
         .update({ is_visible: false, updated_at: new Date().toISOString() })
-        .in("rank", hideRanks);
+        .in("stock_code", toHide);
       if (hideErr) throw hideErr;
     }
 
@@ -145,7 +139,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       updated: visibleRows.length,
-      hidden: hideRanks.length,
+      hidden: toHide.length,
       timestamp: new Date().toISOString(),
     });
   } catch (e) {

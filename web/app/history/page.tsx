@@ -5,6 +5,7 @@ import { getViewer, getPerformanceData } from "@/lib/server-data";
 import { getAdminContext } from "@/lib/admin";
 import { formatKRW, formatPercent } from "@/lib/utils";
 import type { HistoryResult } from "@/lib/types";
+import { MaintenanceGate } from "@/components/layout/MaintenanceGate";
 
 export const dynamic = "force-dynamic";
 
@@ -35,6 +36,9 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
 }
 
 export default async function HistoryPage() {
+  const gate = await MaintenanceGate();
+  if (gate) return gate;
+
   const [viewer, adminCtx, { rows, summary }] = await Promise.all([
     getViewer(),
     getAdminContext(),

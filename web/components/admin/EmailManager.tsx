@@ -8,6 +8,7 @@ const KIND_LABEL: Record<EmailKind, string> = {
   grade_change: "등급변경",
   referral_reward: "추천보상",
   vip_expiry: "VIP만료",
+  feedback: "기능개선요청",
   test: "테스트",
   other: "기타",
 };

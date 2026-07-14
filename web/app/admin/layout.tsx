@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getAdminContext } from "@/lib/admin";
+import { getSiteConfig } from "@/lib/server-data";
 import { Sidebar } from "@/components/admin/Sidebar";
 import { AdminTopbar } from "@/components/admin/AdminTopbar";
 import { buttonVariants } from "@/components/ui/button";
@@ -27,11 +28,14 @@ export default async function AdminLayout({ children }: { children: React.ReactN
     );
   }
 
+  const config = await getSiteConfig();
+  const maintenanceOn = config.maintenance_mode === "true";
+
   return (
     <div className="flex min-h-screen">
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <AdminTopbar email={ctx.email} />
+        <AdminTopbar email={ctx.email} maintenanceOn={maintenanceOn} />
         <div className="flex-1 p-4 md:p-6">{children}</div>
       </div>
     </div>

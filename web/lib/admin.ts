@@ -1,4 +1,5 @@
 import "server-only";
+import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -21,7 +22,7 @@ function envAdminEmails(): string[] {
  * admin 판정: profiles.role='admin' OR admin_whitelist 이메일 OR ADMIN_EMAILS 환경변수.
  * 프론트 분기만으론 불충분 → 페이지·API 모두 이 함수로 이중 검증.
  */
-export async function getAdminContext(): Promise<AdminContext> {
+export const getAdminContext = cache(async (): Promise<AdminContext> => {
   const supabase = createClient();
   const {
     data: { user },
@@ -43,7 +44,7 @@ export async function getAdminContext(): Promise<AdminContext> {
   }
 
   return { userId: user.id, email: user.email ?? null, loggedIn: true, isAdmin };
-}
+});
 
 /** 관리자 작업 감사 로그 (upload_logs, action_type='admin_action'). */
 export async function logAdminAction(adminId: string | null, desc: string) {

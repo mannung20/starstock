@@ -22,7 +22,7 @@ function Row({ stock }: { stock: StockRow }) {
   async function toggleVisible() {
     const next = !visible;
     setVisible(next);
-    await fetch(`/api/admin/stocks/${stock.rank}/visibility`, {
+    await fetch(`/api/admin/stocks/${stock.stock_code}/visibility`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_visible: next }),
@@ -32,7 +32,7 @@ function Row({ stock }: { stock: StockRow }) {
 
   async function save() {
     setSaving(true);
-    await fetch(`/api/admin/stocks/${stock.rank}`, {
+    await fetch(`/api/admin/stocks/${stock.stock_code}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -93,7 +93,7 @@ export function StocksManager({ stocks }: { stocks: StockRow[] }) {
             <tr>{cols.map((c, i) => <th key={i} className="whitespace-nowrap px-2 py-2 font-medium">{c}</th>)}</tr>
           </thead>
           <tbody>
-            {stocks.map((s) => <Row key={s.rank} stock={s} />)}
+            {stocks.map((s) => <Row key={s.stock_code || s.rank} stock={s} />)}
           </tbody>
         </table>
       </div>

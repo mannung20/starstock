@@ -11,13 +11,18 @@ import { formatKRW, formatPercent, cn } from "@/lib/utils";
 export function PriceChange({
   current,
   open,
+  changeRate,
   showPrice = true,
 }: {
   current: number;
   open: number;
+  changeRate?: number; // 엑셀 전일대비 등락률(%). 0/미제공 시 시가대비 계산으로 폴백(전환기)
   showPrice?: boolean;
 }) {
-  const change = intradayChangePercent(current, open);
+  const change =
+    changeRate != null && changeRate !== 0
+      ? changeRate
+      : intradayChangePercent(current, open);
   const prev = useRef(current);
   const [flash, setFlash] = useState<"up" | "down" | null>(null);
 

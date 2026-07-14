@@ -6,10 +6,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * PATCH /api/admin/stocks/[rank]/visibility — 종목 행 숨김 토글 (PRD 14-5)
- * body: { is_visible: boolean }. 엑셀 업로드가 이 값을 덮어쓰지 않음.
+ * PATCH /api/admin/stocks/[code]/visibility — 종목 행 숨김 토글
+ * [code] = stock_code. body: { is_visible: boolean }. 엑셀 업로드가 이 값을 덮어쓰지 않음.
  */
-export async function PATCH(req: NextRequest, { params }: { params: { rank: string } }) {
+export async function PATCH(req: NextRequest, { params }: { params: { code: string } }) {
   const ctx = await getAdminContext();
   if (!ctx.isAdmin) return NextResponse.json({ error: "forbidden" }, { status: 403 });
 
@@ -24,9 +24,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { rank: stri
   const { error } = await admin
     .from("stocks")
     .update({ is_visible: body.is_visible === true, updated_at: new Date().toISOString() })
-    .eq("rank", Number(params.rank));
+    .eq("stock_code", params.code);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-  await logAdminAction(ctx.userId, `종목 rank${params.rank} 표시=${body.is_visible === true}`);
+  await logAdminAction(ctx.userId, `종목 ${params.code} 표시=${body.is_visible === true}`);
   return NextResponse.json({ success: true });
 }

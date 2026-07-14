@@ -3,10 +3,14 @@ import { Footer } from "@/components/layout/Footer";
 import { GiscusComments } from "@/components/board/GiscusComments";
 import { getViewer } from "@/lib/server-data";
 import { getAdminContext } from "@/lib/admin";
+import { MaintenanceGate } from "@/components/layout/MaintenanceGate";
 
 export const dynamic = "force-dynamic";
 
 export default async function BoardPage() {
+  const gate = await MaintenanceGate();
+  if (gate) return gate;
+
   const [viewer, adminCtx] = await Promise.all([getViewer(), getAdminContext()]);
 
   return (

@@ -38,11 +38,15 @@ function RealRow({ stock, role }: { stock: StockRow; role: ViewerRole }) {
   const energy = isVip ? upEnergy(stock) : null;
 
   return (
-    <tr className="border-b hover:bg-accent/40">
+    <tr
+      className={`border-b hover:bg-accent/40 ${
+        stock.status === "buy" ? "animate-pulse bg-emerald-50 dark:bg-emerald-950/30" : ""
+      }`}
+    >
       <td className="px-3 py-2 font-bold text-muted-foreground">#{stock.rank}</td>
       <td className="px-3 py-2 font-semibold">{stock.stock_name}</td>
       <td className="px-3 py-2">
-        <PriceChange current={stock.current_price} open={stock.open_price} />
+        <PriceChange current={stock.current_price} open={stock.open_price} changeRate={stock.change_rate} />
       </td>
       {isVip && <td className="px-3 py-2 tabular-nums text-muted-foreground">{formatKRW(stock.open_price)}</td>}
       {isVip && <td className="px-3 py-2 tabular-nums text-muted-foreground">{formatKRW(stock.high_price)}</td>}

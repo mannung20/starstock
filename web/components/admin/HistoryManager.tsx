@@ -102,9 +102,17 @@ function AddForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-export function HistoryManager({ rows }: { rows: StockHistoryRow[] }) {
+export function HistoryManager({
+  rows,
+  homeVisible,
+}: {
+  rows: StockHistoryRow[];
+  homeVisible: boolean;
+}) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
+  const [showHome, setShowHome] = useState(homeVisible);
+  const [savingCfg, setSavingCfg] = useState(false);
 
   async function remove(r: StockHistoryRow) {
     if (!confirm(`${r.stock_name ?? r.stock_code} 이력을 삭제할까요?`)) return;
@@ -114,16 +122,42 @@ export function HistoryManager({ rows }: { rows: StockHistoryRow[] }) {
   function done() { setAdding(false); router.refresh(); }
   const meta = (k: HistoryResult | null) => RESULTS.find((r) => r.key === k);
 
+  // 홈 화면 표시여부 토글 → site_config.home_performance_visible 저장
+  async function toggleHome(next: boolean) {
+    setShowHome(next); // 낙관적 반영
+    setSavingCfg(true);
+    const res = await fetch("/api/admin/site-config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entries: { home_performance_visible: next ? "true" : "false" } }),
+    });
+    setSavingCfg(false);
+    if (!res.ok) {
+      setShowHome(!next); // 실패 시 롤백
+      alert("설정 저장에 실패했습니다.");
+    }
+  }
+
   return (
     <div className="space-y-4">
       {adding ? (
         <AddForm onDone={done} />
       ) : (
         <>
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-muted-foreground">공개 /history 수익률 현황에 반영됩니다.</p>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={showHome}
+                disabled={savingCfg}
+                onChange={(e) => toggleHome(e.target.checked)}
+              />
+              홈 화면에 수익률 현황 표시
+              {savingCfg && <span className="text-xs text-muted-foreground">저장 중…</span>}
+            </label>
             <Button onClick={() => setAdding(true)}>+ 마감 이력 추가</Button>
           </div>
+          <p className="text-xs text-muted-foreground">공개 /history 및 홈 수익률 현황에 반영됩니다.</p>
           <div className="overflow-x-auto rounded-lg border">
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="bg-muted/50 text-xs text-muted-foreground">

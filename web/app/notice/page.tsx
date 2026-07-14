@@ -4,6 +4,7 @@ import { Footer } from "@/components/layout/Footer";
 import { getViewer, getNotices } from "@/lib/server-data";
 import { getAdminContext } from "@/lib/admin";
 import type { NoticeCategory } from "@/lib/types";
+import { MaintenanceGate } from "@/components/layout/MaintenanceGate";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,9 @@ function ymd(iso: string): string {
 }
 
 export default async function NoticeListPage() {
+  const gate = await MaintenanceGate();
+  if (gate) return gate;
+
   const [viewer, adminCtx, notices] = await Promise.all([
     getViewer(),
     getAdminContext(),

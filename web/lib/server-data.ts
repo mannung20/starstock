@@ -1,7 +1,7 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { StockRow, NoticeRow, UserRole, StockHistoryRow } from "@/lib/types";
+import type { StockRow, NoticeRow, UserRole, StockHistoryRow, BuySignalRow } from "@/lib/types";
 import type { ViewerRole } from "@/lib/stock-slots";
 
 export interface StocksPayload {
@@ -63,13 +63,28 @@ export async function getStocksPayload(): Promise<StocksPayload> {
   };
 }
 
-/** site_config 전체를 key→value 맵으로. RLS 공개 SELECT. */
-export async function getSiteConfig(): Promise<Record<string, string>> {
+/**
+ * 매수신호 이력(공개) — 최신순 limit 건. RLS 로 실운영 신호(note is null)만 반환
+ * (재생 '[replay]' 제외). 홈 SSR·폴링에서 사용.
+ */
+export async function getBuySignals(limit = 5): Promise<BuySignalRow[]> {
+  const supabase = createClient();
+  const { data } = await supabase
+    .from("buy_signals")
+    .select("*")
+    .is("note", null)
+    .order("signaled_at", { ascending: false })
+    .limit(limit);
+  return (data ?? []) as BuySignalRow[];
+}
+
+/** site_config 전체를 key→value 맵으로. RLS 공개 SELECT. (요청당 1회 dedupe) */
+export const getSiteConfig = cache(async (): Promise<Record<string, string>> => {
   const supabase = createClient();
   const { data } = await supabase.from("site_config").select("key, value");
   const rows = (data ?? []) as { key: string; value: string }[];
   return Object.fromEntries(rows.map((r) => [r.key, r.value]));
-}
+});
 
 export interface PerformanceSummary {
   total: number;      // 전체 이력 수

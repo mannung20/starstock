@@ -3,25 +3,42 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { StocksView } from "@/components/stocks/StocksView";
 import { NoticesPreview } from "@/components/home/NoticesPreview";
+import { PerformancePreview } from "@/components/home/PerformancePreview";
+import { SignalHistory } from "@/components/home/SignalHistory";
 import { buttonVariants } from "@/components/ui/button";
 import {
   getViewer,
   getStocksPayload,
   getSiteConfig,
   getNoticesPreview,
+  getPerformanceData,
+  getBuySignals,
 } from "@/lib/server-data";
 import { getAdminContext } from "@/lib/admin";
+import { MaintenanceGate } from "@/components/layout/MaintenanceGate";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const [viewer, payload, config, notices, adminCtx] = await Promise.all([
+  const gate = await MaintenanceGate();
+  if (gate) return gate;
+
+  const [viewer, payload, config, notices, adminCtx, perf, signals] = await Promise.all([
     getViewer(),
     getStocksPayload(),
     getSiteConfig(),
     getNoticesPreview(5),
     getAdminContext(),
+    getPerformanceData(),
+    getBuySignals(5),
   ]);
+
+  // 홈 미리보기: 수익률이 확정된(마감) 최근 종목 3개만. 관리자 설정으로 숨김 가능(기본 표시).
+  const showPerf = config.home_performance_visible !== "false";
+  const perfRows = showPerf ? perf.rows.filter((r) => r.return_rate != null).slice(0, 3) : [];
+
+  // 매수신호 이력: 관리자 표시설정(기본 표시) && 신호 1건 이상일 때만.
+  const showSignals = config.home_signals_visible !== "false";
 
   const layout = config.stock_layout === "table" ? "table" : "card";
   const freeCount = Number(config.free_visible_count ?? "3");
@@ -48,6 +65,13 @@ export default async function HomePage() {
           freeCount={freeCount}
           layout={layout}
           intervalMs={intervalMin * 60_000}
+          buyAlert={{
+            imageEnabled: config.buy_alert_image_enabled === "true",
+            imageUrl: config.buy_alert_image_url ?? "",
+            imageDuration: Number(config.buy_alert_image_duration ?? "30") || 30,
+            soundEnabled: config.buy_alert_sound_enabled === "true",
+            soundUrl: config.buy_alert_sound_url ?? "",
+          }}
         />
 
         {/* VIP 유도 배너 (비회원/무료회원) */}
@@ -65,6 +89,14 @@ export default async function HomePage() {
         )}
 
         <NoticesPreview notices={notices} />
+
+        {perfRows.length > 0 && (
+          <PerformancePreview summary={perf.summary} rows={perfRows} />
+        )}
+
+        {showSignals && signals.length > 0 && (
+          <SignalHistory initial={signals} isAdmin={adminCtx.isAdmin} />
+        )}
       </main>
       <Footer />
     </>

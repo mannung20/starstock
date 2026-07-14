@@ -4,10 +4,14 @@ import { RewardStructure, type RewardConfig } from "@/components/referral/Reward
 import { ReferralPanel } from "@/components/referral/ReferralPanel";
 import { getViewer, getSiteConfig } from "@/lib/server-data";
 import { getAdminContext } from "@/lib/admin";
+import { MaintenanceGate } from "@/components/layout/MaintenanceGate";
 
 export const dynamic = "force-dynamic";
 
 export default async function ReferralPage() {
+  const gate = await MaintenanceGate();
+  if (gate) return gate;
+
   const [viewer, config, adminCtx] = await Promise.all([
     getViewer(),
     getSiteConfig(),

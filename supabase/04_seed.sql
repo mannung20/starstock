@@ -3,10 +3,12 @@
 -- 기준: PRD 섹션 4-5 / 14-3 / 14-8-2
 -- =============================================================================
 
--- ── stocks: rank 1~10 빈 행 미리 생성 ───────────────────────────────────
-insert into public.stocks (rank)
-select g from generate_series(1, 10) as g
-on conflict (rank) do nothing;
+-- ── stocks: 빈 행 선생성 폐기 (v3.1 종목모델 전환, 07_stocks_migration.sql) ──
+--    "고정 10슬롯" 폐기 → 종목이 업로드될 때만 stock_code 기준으로 행 생성.
+--    (기존 on conflict(rank) 방식은 rank UNIQUE 제거로 더 이상 사용 불가)
+-- insert into public.stocks (rank)
+-- select g from generate_series(1, 10) as g
+-- on conflict (rank) do nothing;
 
 -- ── admin_whitelist: 운영자 이메일 ──────────────────────────────────────
 insert into public.admin_whitelist (email, memo)

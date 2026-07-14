@@ -14,6 +14,7 @@ export interface UploadStockItem {
   stop_price: number;
   entry_price: number;
   entry_confirmed: boolean;
+  change_rate: number; // 등락률(%) — 엑셀 직접 수신(1차 정렬 기준). 없으면 0.
   status: StockStatus;
   memo: string | null;
 }
@@ -33,6 +34,14 @@ function toInt(v: unknown): number | null {
   if (typeof v === "number" && Number.isFinite(v)) return Math.trunc(v);
   if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v)))
     return Math.trunc(Number(v));
+  return null;
+}
+
+/** 소수 허용 숫자 파싱(등락률 등). 파싱 실패 시 null. */
+function toNum(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v)))
+    return Number(v);
   return null;
 }
 
@@ -61,6 +70,7 @@ export function validateUploadPayload(body: unknown): ValidationResult {
     return { ok: false, error: "Invalid data format", detail: "stocks 길이는 1~10" };
 
   const seenRanks = new Set<number>();
+  const seenCodes = new Set<string>(); // stock_code 중복 방지(upsert 키)
   const items: UploadStockItem[] = [];
 
   for (let i = 0; i < b.stocks.length; i++) {
@@ -91,6 +101,7 @@ export function validateUploadPayload(body: unknown): ValidationResult {
         stop_price: 0,
         entry_price: 0,
         entry_confirmed: false,
+        change_rate: 0,
         status: "hold",
         memo: null,
       });
@@ -99,6 +110,9 @@ export function validateUploadPayload(body: unknown): ValidationResult {
 
     if (!/^\d{6}$/.test(stockCode))
       return { ok: false, error: "Invalid data format", detail: `${where}.stock_code 는 6자리 숫자` };
+    if (seenCodes.has(stockCode))
+      return { ok: false, error: "Invalid data format", detail: `stock_code ${stockCode} 중복` };
+    seenCodes.add(stockCode);
 
     const currentPrice = toInt(raw.current_price);
     if (currentPrice === null || currentPrice <= 0)
@@ -121,6 +135,7 @@ export function validateUploadPayload(body: unknown): ValidationResult {
       stop_price: toInt(raw.stop_price) ?? 0,
       entry_price: toInt(raw.entry_price) ?? 0,
       entry_confirmed: raw.entry_confirmed === true,
+      change_rate: toNum(raw.change_rate) ?? 0,
       status,
       memo: raw.memo == null ? null : String(raw.memo),
     });

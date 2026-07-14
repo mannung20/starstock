@@ -18,6 +18,7 @@ export interface SendEmailInput {
   subject: string;
   html: string;
   text?: string;
+  replyTo?: string | string[]; // 답장 수신 주소(관리자→요청자 직접 회신용). Resend reply_to 필드로 전달.
   kind?: EmailKind; // email_logs 분류용 (미지정 시 'other')
 }
 
@@ -102,6 +103,7 @@ async function sendViaResend(input: SendEmailInput, to: string[]): Promise<SendR
       subject: input.subject,
       html: input.html,
       text: input.text,
+      ...(input.replyTo ? { reply_to: input.replyTo } : {}),
     }),
     cache: "no-store",
   });
