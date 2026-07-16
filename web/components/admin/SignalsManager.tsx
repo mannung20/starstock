@@ -35,7 +35,7 @@ export function SignalsManager({
   homeVisible: boolean;
 }) {
   const [signals, setSignals] = useState<BuySignalRow[]>(initial);
-  const [preset, setPreset] = useState<Preset>("today");
+  const [preset, setPreset] = useState<Preset>("all");
   const [date, setDate] = useState(today);
   const [loading, setLoading] = useState(false);
   const [showHome, setShowHome] = useState(homeVisible);
@@ -83,6 +83,21 @@ export function SignalsManager({
     }
   }
 
+  // 전체 초기화: 재생신호 + note=null 유령신호까지 모두 삭제(테스트 데이터 정리용).
+  // 실운영 신호도 함께 사라지므로 이중 확인.
+  async function bulkDeleteAll() {
+    if (!confirm("⚠️ 매수신호 이력을 '전체' 삭제합니다.\n재생신호뿐 아니라 홈에 보이는 실운영 신호까지 모두 사라집니다.\n계속할까요?")) return;
+    if (prompt('되돌릴 수 없습니다. 계속하려면 "초기화" 를 입력하세요.') !== "초기화") return;
+    const res = await fetch(`/api/admin/signals?scope=all`, { method: "DELETE" });
+    if (res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { deleted?: number };
+      alert(`매수신호 전체 ${j.deleted ?? 0}건 초기화 완료`);
+      setSignals([]);
+    } else {
+      alert("전체 초기화에 실패했습니다.");
+    }
+  }
+
   async function toggleHome(next: boolean) {
     setShowHome(next);
     setSavingCfg(true);
@@ -116,7 +131,10 @@ export function SignalsManager({
           홈 화면에 매수신호 이력 표시
           {savingCfg && <span className="text-xs text-muted-foreground">저장 중…</span>}
         </label>
-        <Button variant="destructive" onClick={bulkDeleteReplay}>재생신호 일괄삭제</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="destructive" onClick={bulkDeleteReplay}>재생신호 일괄삭제</Button>
+          <Button variant="destructive" onClick={bulkDeleteAll}>전체 이력 초기화</Button>
+        </div>
       </div>
 
       {/* 날짜별 조회 */}

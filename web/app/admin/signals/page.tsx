@@ -11,10 +11,10 @@ export default async function AdminSignalsPage() {
 
   const admin = createAdminClient();
   const [{ data }, config] = await Promise.all([
+    // 기본 프리셋 '전체'와 일치: 날짜 필터 없이 최신 500건(재생/유령 note=null 포함).
     admin
       .from("buy_signals")
       .select("*")
-      .eq("trade_date", today)
       .order("signaled_at", { ascending: false })
       .limit(500),
     getSiteConfig(),

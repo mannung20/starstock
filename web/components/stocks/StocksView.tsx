@@ -54,6 +54,7 @@ export function StocksView({
   // 매수적기(status=buy) 종목 존재 여부 → 이미지/사운드 알림
   const buyExists = data.stocks.some((s) => s.status === "buy");
   const [soundOn, setSoundOn] = useState(false);
+  const [imageOn, setImageOn] = useState(true); // 알림화면 자동표시 켜짐 여부(토글)
   const [imageShown, setImageShown] = useState(false); // 알림화면 표시 중(설정 시간 후 자동 숨김)
   const [imageLeft, setImageLeft] = useState(0); // 남은 표시 시간(초)
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -96,14 +97,26 @@ export function StocksView({
     if (next) playAlert();
   }
 
+  // 알림화면 켜기/끄기 토글: 켜면 미리보기 표시, 끄면 현재 알림도 숨김
+  function toggleImage() {
+    const next = !imageOn;
+    setImageOn(next);
+    if (next) {
+      showImage();
+    } else {
+      if (imgTimer.current) clearInterval(imgTimer.current);
+      setImageShown(false);
+    }
+  }
+
   // 매수적기가 새로 등장하면(폴링/최초로드) 알림화면 표시 + 소리(켠 경우)
   useEffect(() => {
     if (buyExists && !prevBuy.current) {
-      if (buyAlert.imageEnabled && buyAlert.imageUrl) showImage();
+      if (buyAlert.imageEnabled && buyAlert.imageUrl && imageOn) showImage();
       if (soundOn) playAlert();
     }
     prevBuy.current = buyExists;
-  }, [buyExists, soundOn, playAlert, showImage, buyAlert.imageEnabled, buyAlert.imageUrl]);
+  }, [buyExists, soundOn, imageOn, playAlert, showImage, buyAlert.imageEnabled, buyAlert.imageUrl]);
 
   const poll = useCallback(async () => {
     if (busy.current) return;
@@ -170,8 +183,8 @@ export function StocksView({
             <h2 className="text-lg font-bold">오늘의 매매종목</h2>
             <div className="flex flex-wrap gap-2">
               {buyAlert.imageEnabled && buyAlert.imageUrl && (
-                <Button size="sm" variant="outline" onClick={showImage}>
-                  🖼️ 알림화면 켜기
+                <Button size="sm" variant="outline" onClick={toggleImage}>
+                  {imageOn ? "🖼️ 알림화면 끄기" : "🖼️ 알림화면 켜기"}
                 </Button>
               )}
               {buyAlert.soundEnabled && buyAlert.soundUrl && (
