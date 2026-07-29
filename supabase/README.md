@@ -9,9 +9,13 @@ Supabase Dashboard > **SQL Editor** 에서 아래 파일을 **순서대로** 붙
 | 3 | `03_rls.sql` | 전 테이블 RLS 활성화 + 정책 |
 | 4 | `04_seed.sql` | stocks 1~10 빈 행, 관리자 이메일, display_config·site_config 기본값 |
 | 5 | `05_referral_rpc.sql` | 추천 RPC: `process_referral`(가입 콜백 단일 트랜잭션) + `grant_vip_days`(구독 연장) + `mask_email`. 서버(service_role)만 실행 권한 |
+| … | `06_email_logs.sql` ~ `10_signal_bridge.sql` | 이메일/종목마이그레이션/매수신호/성과/승격브릿지 (각 기능별) |
+| 11 | `11_reseller.sql` | 리셀러(총판) 시스템: resellers·reseller_settlements 테이블 + profiles/subscriptions/upload_logs 컬럼 + role='reseller' + notices 'reseller' 카테고리 + site_config 10키 + RLS(`my_reseller_id`). **기존 프로젝트는 11 만 추가 Run** |
 
 > **01~04 를 이미 실행한 기존 프로젝트는 05 만 추가로 Run** 하면 됩니다(01~04 재실행 불필요).
 > 추천 테이블/컬럼/RLS/site_config 키는 이미 01~04 에 포함, 05 는 함수만 추가합니다.
+> **11 은 전 구문 idempotent**(`if not exists`/`on conflict do nothing`) 라 재실행 안전.
+> 실행 전 Supabase 백업 권장(role CHECK 변경·컬럼 추가 포함, PRD 섹션 13-5).
 
 ## 실행 후 대시보드에서 확인할 것
 - [ ] **Authentication > Providers**: Email 가입 **비활성화**, Google **활성화** (구글 로그인만 허용)

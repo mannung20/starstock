@@ -2,10 +2,127 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { serverEnv } from "@/lib/env";
 import { rateLimit } from "@/lib/rate-limit";
-import { validateUploadPayload, isTimestampFresh } from "@/lib/validation";
+import {
+  validateUploadPayload,
+  isTimestampFresh,
+  type UploadStockItem,
+} from "@/lib/validation";
+import { isShortWindow } from "@/lib/signal-performance";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+
+/**
+ * 자동 최고달성률(max_pct) 추적 — PRD v3 자동수익률이력기록 rev3, 7절.
+ * stocks upsert(=트리거가 buy_signals 생성) 직후 호출해, 활성 신호마다 이번 주기
+ * 현재가로 최고달성률을 누적하고 만료 신호를 finalize 한다.
+ *
+ * 핵심 규칙:
+ *  - 추적대상 SELECT = finalized=false AND note is null (만료조건 넣지 않음: 만료 확정을
+ *    루프 안에서 처리해야 마지막 표본·finalize 누락이 없음. 부분인덱스 idx_buy_signals_active).
+ *  - 만료(now>=tracking_until) → finalized=true 후 skip(이후 갱신 중단).
+ *  - max_pct 갱신은 ★조건부 UPDATE(.lt("max_pct", pct)) → 동시/재시도에도 낮은값이 높은값을
+ *    못 덮음(단조 최댓값 원자 보장, PRD 11 멱등의 실제 근거). 앞의 if 는 헛 write 감소용 게이트.
+ *  - entry_price<=0 방어(0나눗셈 skip), top-10 이탈 종목은 이번 표본 skip(max_pct 유지).
+ */
+/** ISO timestamp → KST 날짜(YYYY-MM-DD). recommend_date/close_date 매핑용. */
+function kstDate(iso: string): string {
+  return new Date(iso).toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" });
+}
+
+async function trackBuySignals(
+  supabase: ReturnType<typeof createAdminClient>,
+  visibleRows: UploadStockItem[]
+): Promise<{ updated: number; finalized: number; promoted: number }> {
+  const now = Date.now();
+  const nowIso = new Date(now).toISOString();
+
+  // 브릿지 설정(10_signal_bridge.sql seed) — 조건부 자동 승격. 없으면 안전기본(off/5/full).
+  const { data: cfgRows } = await supabase
+    .from("site_config")
+    .select("key, value")
+    .in("key", ["auto_bridge_enabled", "auto_bridge_min_pct", "auto_bridge_full_only"]);
+  const cfg = new Map((cfgRows ?? []).map((r) => [r.key, r.value] as const));
+  const bridgeEnabled = cfg.get("auto_bridge_enabled") === "true";
+  const bridgeMinPct = Number(cfg.get("auto_bridge_min_pct") ?? "5") || 5;
+  const bridgeFullOnly = cfg.get("auto_bridge_full_only") !== "false"; // 기본 true
+
+  const { data: active, error } = await supabase
+    .from("buy_signals")
+    .select("id, stock_code, stock_name, entry_price, max_pct, max_price, signaled_at, tracking_until")
+    .eq("finalized", false)
+    .is("note", null)
+    .not("tracking_until", "is", null); // 09 적용 이전 레거시 행(추적창 null)은 추적 제외
+  // (미래안전: 마이그레이션 전 note-null 신호가 있었다면 tracking_until 이 없어 만료판정이
+  //  불가 → 영구 추적됨. 기능시대 신호는 트리거가 항상 tracking_until 을 세팅하므로 이 필터로
+  //  안전 분리. 현재 데이터는 전부 replay 라 note 필터로도 이미 제외됨.)
+  if (error) throw error;
+  if (!active || active.length === 0) return { updated: 0, finalized: 0, promoted: 0 };
+
+  const priceByCode = new Map<string, number>();
+  for (const s of visibleRows) priceByCode.set(s.stock_code, s.current_price);
+
+  let updated = 0;
+  let finalized = 0;
+  let promoted = 0;
+
+  for (const sig of active) {
+    // 만료 → finalize 확정(루프 안에서 처리). tracking_until 은 timestamptz 문자열이라
+    // 포맷·정밀도 차이가 있으므로 문자열 비교 대신 Date.parse 로 시각 비교.
+    if (sig.tracking_until && Date.parse(sig.tracking_until) <= now) {
+      // ★조건부 자동 승격(브릿지): finalize '전에' 수행(L2 크래시안전). 조건 통과 시
+      //   stock_history 로 1건 복사. 멱등: 부분 UNIQUE(signal_id) 위반(23505)은 이미
+      //   승격된 것 → 무시. (부분 인덱스는 upsert onConflict 추론 불가 → insert+catch 방식.)
+      if (
+        bridgeEnabled &&
+        sig.max_pct >= bridgeMinPct &&
+        (!bridgeFullOnly || !isShortWindow(sig.signaled_at, sig.tracking_until))
+      ) {
+        const { error: brErr } = await supabase.from("stock_history").insert({
+          stock_code: sig.stock_code,
+          stock_name: sig.stock_name,
+          entry_price: sig.entry_price,
+          exit_price: sig.max_price,
+          return_rate: sig.max_pct,
+          result: "profit",
+          recommend_date: kstDate(sig.signaled_at),
+          close_date: kstDate(sig.tracking_until),
+          notes: "[자동·최고달성]",
+          signal_id: sig.id,
+        });
+        if (brErr && brErr.code !== "23505") throw brErr; // 23505=중복(이미 승격) → 무시
+        if (!brErr) promoted++;
+      }
+
+      const { error: finErr } = await supabase
+        .from("buy_signals")
+        .update({ finalized: true })
+        .eq("id", sig.id);
+      if (finErr) throw finErr;
+      finalized++;
+      continue;
+    }
+
+    const cur = priceByCode.get(sig.stock_code);
+    if (cur === undefined) continue;               // top-10 이탈 → 이번 표본 skip
+    if (!sig.entry_price || sig.entry_price <= 0) continue; // 0나눗셈 방어
+
+    const pct =
+      Math.round(((cur - sig.entry_price) / sig.entry_price) * 100 * 100) / 100;
+    if (pct <= sig.max_pct) continue;              // 1차 게이트(헛 write 감소)
+
+    const { data: patched, error: upErr } = await supabase
+      .from("buy_signals")
+      .update({ max_pct: pct, max_price: cur, max_at: nowIso })
+      .eq("id", sig.id)
+      .lt("max_pct", pct)                          // ★조건부: 단조 최댓값 원자 보장
+      .select("id");
+    if (upErr) throw upErr;
+    if (patched && patched.length > 0) updated++;
+  }
+
+  return { updated, finalized, promoted };
+}
 
 /**
  * POST /api/upload-stocks — 엑셀 업로더 → DB 저장 (PRD 섹션 5-1)
@@ -128,6 +245,19 @@ export async function POST(req: NextRequest) {
       if (hideErr) throw hideErr;
     }
 
+    // 7.5) 자동 최고달성률 추적 (best-effort) — 핵심 업로드(6~7) 성공 뒤 부가 처리.
+    //   추적 실패가 업로드 전체를 500 으로 만들지 않도록 격리(업로더 재시도 폭주·화면 갱신
+    //   중단 방지). 09 SQL 미적용 시점(컬럼 없음)에도 업로드는 정상 동작하도록 보호.
+    let tracked = { updated: 0, finalized: 0, promoted: 0 };
+    try {
+      tracked = await trackBuySignals(supabase, visibleRows);
+    } catch (e) {
+      console.error(
+        "[upload-stocks] signal tracking skipped:",
+        (e as Error).message
+      );
+    }
+
     // 8) 성공 로그
     await supabase.from("upload_logs").insert({
       action_type: "upload",
@@ -140,6 +270,7 @@ export async function POST(req: NextRequest) {
       success: true,
       updated: visibleRows.length,
       hidden: toHide.length,
+      tracked,
       timestamp: new Date().toISOString(),
     });
   } catch (e) {

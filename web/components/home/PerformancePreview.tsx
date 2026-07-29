@@ -81,10 +81,15 @@ export function PerformancePreview({
                   </td>
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.close_date ?? "-"}</td>
                   <td className={`px-3 py-2 font-semibold tabular-nums ${returnTone(r.return_rate)}`}>
+                    {r.signal_id != null && <span className="mr-1 text-xs font-normal text-muted-foreground">최고</span>}
                     {formatPercent(r.return_rate)}
                   </td>
                   <td className="px-3 py-2">
-                    <span className={`font-medium ${meta?.cls ?? ""}`}>{meta?.label ?? "-"}</span>
+                    {r.signal_id != null ? (
+                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">최고달성</span>
+                    ) : (
+                      <span className={`font-medium ${meta?.cls ?? ""}`}>{meta?.label ?? "-"}</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{r.notes}</td>
                 </tr>

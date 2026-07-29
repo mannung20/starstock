@@ -2,12 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/email";
 import { vipExpiryEmail } from "@/lib/email-templates";
+import { getSiteUrl } from "@/lib/site-url";
 import type { ProfileRow, SubscriptionRow } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://starstock.vercel.app";
 
 /** 오늘 기준 offsetDays 일 뒤 날짜 (YYYY-MM-DD, UTC) */
 function dateStr(offsetDays: number): string {
@@ -30,6 +29,7 @@ export async function GET(req: NextRequest) {
 
   const dry = new URL(req.url).searchParams.get("dryRun") === "1";
   const admin = createAdminClient();
+  const SITE_URL = await getSiteUrl(); // 관리자 대표주소 우선 → env → 영구주소 (notify 클로저가 캡처)
   const today = dateStr(0);
   const d3 = dateStr(3);
 

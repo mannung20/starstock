@@ -132,6 +132,8 @@ export type StockHistoryRow = {
   result: HistoryResult | null;
   notes: string | null;
   created_at: string;
+  // 10_signal_bridge.sql — 승격행 링크(자동 최고달성률에서 복사). null=수동행.
+  signal_id: number | null;      // → buy_signals.id (UNIQUE, ON DELETE CASCADE)
 }
 
 // 08_buy_signals.sql — 매수신호 발생 이력 (status→'buy' 전환 시 트리거 자동 기록)
@@ -145,6 +147,12 @@ export type BuySignalRow = {
   signaled_at: string;   // timestamptz
   trade_date: string;    // date (KST 거래일)
   note: string | null;   // '[replay]' 재생신호 표식, 실운영=null
+  // 09_signal_performance.sql — 자동 최고달성률 추적 (신호 후 tracking_until 까지)
+  max_pct: number;              // 최고달성률(%) numeric(6,2), 트리거가 신호시점값으로 초기화
+  max_price: number;            // 최고 표본가(참고) integer
+  max_at: string | null;        // 최고 도달 시각 timestamptz
+  tracking_until: string | null;// 추적창 종료 = min(신호+60분, 당일15:30 KST)
+  finalized: boolean;           // 추적 종료 확정
 }
 
 export type RewardType = "milestone" | "repeat" | "referee" | "manual";
@@ -222,7 +230,11 @@ export type Database = {
       referral_rewards: TableShape<ReferralRewardRow, "id" | "rewarded_at" | "reward_type">;
       stock_history: TableShape<StockHistoryRow, "id" | "created_at">;
       email_logs: TableShape<EmailLogRow, "id" | "created_at" | "kind">;
-      buy_signals: TableShape<BuySignalRow, "id" | "signaled_at" | "trade_date" | "entry_price" | "signal_price">;
+      buy_signals: TableShape<
+        BuySignalRow,
+        | "id" | "signaled_at" | "trade_date" | "entry_price" | "signal_price"
+        | "max_pct" | "max_price" | "finalized"  // not-null + DB default → INSERT optional
+      >;
     };
     Views: { [_ in never]: never };
     Functions: {

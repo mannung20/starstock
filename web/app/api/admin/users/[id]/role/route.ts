@@ -3,11 +3,10 @@ import { getAdminContext, logAdminAction } from "@/lib/admin";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail } from "@/lib/email";
 import { gradeChangeEmail } from "@/lib/email-templates";
+import { getSiteUrl } from "@/lib/site-url";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || "https://starstock.vercel.app";
 
 /**
  * PATCH /api/admin/users/[id]/role — 회원 등급 변경 (FREE↔VIP) (PRD 5-3 / 9-3)
@@ -72,11 +71,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   // p4-6: 등급변경 이메일 알림 (best-effort — provider 미설정/수신거부 시 조용히 생략, 등급변경 성공에는 영향 없음)
   if (tp?.email && tp.email_notify !== false) {
     try {
+      const siteUrl = await getSiteUrl(); // 관리자 대표주소 우선 → env → 영구주소
       const tpl = gradeChangeEmail({
         name: tp.display_name ?? undefined,
         newRole: role,
         endDate: body.end_date ?? null,
-        siteUrl: SITE_URL,
+        siteUrl,
       });
       await sendEmail({ to: tp.email, subject: tpl.subject, html: tpl.html, kind: "grade_change" });
     } catch {

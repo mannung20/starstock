@@ -1,0 +1,169 @@
+{
+  "meta": {
+    "title": "자동 최고달성률 → 수동(홈) 조건부 자동 승격 브릿지",
+    "prd": "prd-v3-자동홈승격브릿지-계획1.txt",
+    "rev": "rev2",
+    "created": "2026-07-16",
+    "updated": "2026-07-16",
+    "overall_status": "Step1~7 완료. 렌더E2E(승격행 홈/수동탭/history 배지)+CASCADE+router.refresh 실증, 테스트데이터 정리. 남은 것=배포(git push) 후 config ON시 장중 실신호로 실브릿지 자연검증.",
+    "progress_pct": 100,
+    "owner": "Claude",
+    "parent": "prd-v3-자동수익률이력기록-계획1.txt",
+    "related": [
+      "stock_history(수동·홈)",
+      "buy_signals(자동)",
+      "09_signal_performance.sql"
+    ]
+  },
+  "confirmed_decisions": {
+    "방식": "B 조건부 자동(finalize 시 조건 통과분만 승격)",
+    "최소달성률": "max_pct>=5% 기본, site_config auto_bridge_min_pct 로 관리자 조정",
+    "게이트": "완주창만(is_short=false) + 실신호(note null) + finalized",
+    "삭제연동": "CASCADE (buy_signals 삭제→승격 stock_history 행도 삭제)",
+    "홈라벨": "'최고 +X%' 문구 + '최고달성' 배지(실현수익과 구분)",
+    "저장": "stock_history.signal_id UNIQUE FK->buy_signals ON DELETE CASCADE",
+    "활성화": "기본 OFF, 관리자 스위치로 ON"
+  },
+  "logic_review": [
+    {
+      "id": "L1",
+      "sev": "high",
+      "topic": "홈 요약통계 오염",
+      "fix": "★사용자결정=요약 기존대로(승격행 포함). getPerformanceData 변경없음. 승률·평균에 최고달성률 포함되어 상향됨(감안). 리스트는 L4 라벨로 구분.",
+      "status": "사용자결정-철회"
+    },
+    {
+      "id": "L2",
+      "sev": "high",
+      "topic": "크래시 안전 순서",
+      "fix": "브릿지 upsert(ignoreDuplicates) 먼저 → finalize 나중(멱등)",
+      "status": "설계반영"
+    },
+    {
+      "id": "L3",
+      "sev": "mid",
+      "topic": "업로더 다운 지연승격",
+      "fix": "read-condition finalize 신호는 익일 첫 loop서 finalize+브릿지, 영구누락 아님",
+      "status": "설계반영"
+    },
+    {
+      "id": "L4",
+      "sev": "mid",
+      "topic": "결과열 의미",
+      "fix": "승격행은 '이익' 대신 '최고달성' 배지+'최고 +X%'(signal_id로 분기)",
+      "status": "설계반영"
+    },
+    {
+      "id": "L5",
+      "sev": "low",
+      "topic": "CASCADE 광역삭제",
+      "fix": "/admin/signals 전체초기화가 승격 홈행도 삭제(허용), 경고문 추가 권장",
+      "status": "설계반영"
+    },
+    {
+      "id": "L6",
+      "sev": "low",
+      "topic": "동일종목 다중 승격행",
+      "fix": "재신호는 서로 다른 signal_id → 홈 여러행 정상",
+      "status": "설계반영"
+    }
+  ],
+  "steps": [
+    {
+      "id": 1,
+      "name": "10_signal_bridge.sql",
+      "detail": "signal_id 컬럼+FK CASCADE+UNIQUE(partial)+site_config seed 3키",
+      "status": "completed",
+      "progress_note": "적용·기능검증완료(2026-07-16): signal_id컬럼 select200, site_config 3키(false/5/true), 중복 signal_id→409 UNIQUE거부, 신호삭제→승격행 CASCADE 자동삭제 모두 실증. 테스트데이터 정리.",
+      "files": [
+        "supabase/10_signal_bridge.sql"
+      ],
+      "depends_on": [],
+      "verify": "컬럼/제약/인덱스/site_config 기본값 확인"
+    },
+    {
+      "id": 2,
+      "name": "types.ts StockHistoryRow.signal_id",
+      "detail": "signal_id number|null + Insert optional",
+      "status": "completed",
+      "files": [
+        "web/lib/types.ts"
+      ],
+      "depends_on": [
+        1
+      ],
+      "progress_note": "types.ts signal_id 추가 완료"
+    },
+    {
+      "id": 3,
+      "name": "브릿지 로직(upload-stocks)",
+      "detail": "SELECT 컬럼확장+config읽기+브릿지 upsert→finalize(L2 순서)",
+      "status": "completed",
+      "files": [
+        "web/app/api/upload-stocks/route.ts"
+      ],
+      "depends_on": [
+        2
+      ],
+      "verify": "조건통과분만 stock_history 생성, 멱등, best-effort 격리",
+      "progress_note": "트랙루프에 브릿지(config읽기+게이트+insert+catch23505 멱등, finalize전 수행 L2) 완료. tsc0"
+    },
+    {
+      "id": 4,
+      "name": "getPerformanceData 요약",
+      "detail": "★변경 없음(L1 사용자결정: 요약 기존대로, 승격행 포함)",
+      "status": "skip",
+      "files": [],
+      "depends_on": [
+        2
+      ]
+    },
+    {
+      "id": 5,
+      "name": "홈/이력/수동탭 라벨 분기",
+      "detail": "signal_id!=null → 최고 +X% + 최고달성 배지",
+      "status": "completed",
+      "files": [
+        "web/components/home/PerformancePreview.tsx",
+        "web/app/history",
+        "web/components/admin/HistoryManager.tsx"
+      ],
+      "depends_on": [
+        4
+      ],
+      "progress_note": "홈 PerformancePreview/공개 history/관리자 수동탭 3화면 '최고+X%'+'최고달성' 배지 완료"
+    },
+    {
+      "id": 6,
+      "name": "자동탭 설정 스위치 3종",
+      "detail": "enabled/min_pct/full_only → site-config PATCH",
+      "status": "completed",
+      "files": [
+        "web/components/admin/HistoryManager.tsx"
+      ],
+      "depends_on": [
+        1
+      ],
+      "progress_note": "관리자 자동탭 상단 설정스위치3종(enabled/min_pct/full_only) site-config PATCH 완료"
+    },
+    {
+      "id": 7,
+      "name": "정적검증+E2E",
+      "detail": "tsc/lint + 임시신호 승격→홈표시→CASCADE삭제",
+      "status": "completed",
+      "files": [],
+      "depends_on": [
+        3,
+        5,
+        6
+      ],
+      "progress_note": "렌더E2E: 임시 buy_signals+연결 stock_history 주입→자동탭 원본유지·수동/홈/history 최고달성배지 확인·CASCADE 자동삭제·router.refresh 수동탭 자동반영 실증. tsc0/lint무경고. 실브릿지(신호 finalize→자동 insert)는 배포+config ON+장중 실신호로 자연검증(부모 Step5와 동일)."
+    }
+  ],
+  "open_questions": [],
+  "future_scope": [
+    "승격행 max_pct 재동기 버튼",
+    "홈 '최고달성' 전용 섹션 분리",
+    "등급별 자동승격 임계 세분화"
+  ]
+}

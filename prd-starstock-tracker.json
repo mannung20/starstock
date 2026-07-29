@@ -1,0 +1,774 @@
+{
+  "_meta": {
+    "purpose": "StarStock 개발 진행 추적기 - 세션마다 status 업데이트",
+    "prd_reference": "prd-v2.txt (v2.10), prd-v2-view-admin.txt, prd-v2-view-user.txt",
+    "created_at": "2026-07-08",
+    "last_updated": "2026-07-10 (p4-6 이메일 알림 연결 완료 + email_logs/admin 이메일페이지 + Cron 런타임검증 + 추천 RPC 05/email_logs 06 실행검증 + server bat 4종)",
+    "key_order_rationale": "PRD 섹션2 3-Layer 아키텍처 + 빌드 의존성 흐름: 전제(meta/decisions/infra/env) → 데이터기반(database) → 데이터흐름(excel→api→pages→ui) → 교차관심사(security) → 참고(packages) → 실행계획(phases) → 진행요약(progress)",
+    "status_values": ["pending", "in_progress", "completed", "skipped"],
+    "changelog": [
+      "2026-07-09: PRD v2.10 기준 전면 보완 - 폴링 확정(Realtime 제거), 5분 주기, entry_price/entry_confirmed, referral 시스템, 이메일 발송, display_config/site_config, 화면·사이트 설정 페이지/API, RPC 함수 반영. 키 순서 3-Layer 기준 재배치."
+    ]
+  },
+
+  "project": {
+    "name": "StarStock",
+    "github": "mannung20/starstock",
+    "vercel_url": "starstock.vercel.app",
+    "admin_email": "kwk1020kr@gmail.com"
+  },
+
+  "decisions": {
+    "frontend_framework": "Next.js 14 (App Router)",
+    "excel_script_language": "Python",
+    "css_framework": "Tailwind CSS + shadcn/ui",
+    "board_system": "Giscus",
+    "payment_method": "수동처리 (무통장 입금 후 관리자 수동 등급 변경)",
+    "realtime_method": "폴링(Polling)",
+    "refresh_interval_min": 5,
+    "guest_visible_stocks": 1,
+    "free_member_visible_stocks": 3,
+    "vip_visible_stocks": 10,
+    "vip_expiry_method": "수동 (자동 Cron은 Phase 4 이메일 알림과 함께 선택 구현)",
+    "use_stock_history": true,
+    "use_display_config": true,
+    "use_site_config": true,
+    "use_referral_system": true,
+    "use_email_notify": true,
+    "stock_layout_default": "card",
+    "domain": "starstock.vercel.app (유지)",
+    "mobile_strategy": "웹반응형 + 모바일보기 버튼 추가",
+    "target_hts": "eBest증권 (xingAPI DDE, 서버명 EtkDS / 토픽 eds)",
+    "notes": {
+      "realtime_change": "v2.6에서 Supabase Realtime → 폴링(Polling) 확정. 브라우저 setInterval로 GET /api/stocks N분 주기 요청. 10종목 소규모에 Realtime은 과도.",
+      "refresh_interval": "기본 5분 확정. 엑셀 P3 콤보박스로 운영자 변경 가능(1/3/5/10/30분). 변경 후 Python 재시작 시 적용.",
+      "free_member_stocks": "비회원 1개 / 무료 3개 / VIP 10개 전체. 관리자 site_config에서 조정 가능.",
+      "ebest_dde": "엑셀 포커스 유지 로직 필수 (백그라운드 시 DDE 갱신 중단 가능). 전일고가 DDE 미지원 → 장마감 15:30 F열(고가) 복사.",
+      "energy_naming": "v2.5에서 '달성률' → '상승에너지' 명칭 변경. 목표가(+남은상승에너지%) / 손절가(-하락위험%) 병기(C안)."
+    }
+  },
+
+  "infrastructure": {
+    "github_repo": "mannung20/starstock",
+    "github_status": "ready",
+    "vercel_status": "ready",
+    "supabase_url": "https://orxxyzdjvcfrptoxippr.supabase.co",
+    "supabase_anon_key": "sb_publishable_al-tH42y566SRCkeqCkLWg_w4q7QtrR",
+    "google_oauth_client_id": "573377079589-ie6dhvkhmqlihhjsmb1rrl5dhh49jn2u.apps.googleusercontent.com",
+    "google_oauth_status": "ready"
+  },
+
+  "env_variables": {
+    "description": "Vercel Dashboard > Settings > Environment Variables 에 설정",
+    "items": [
+      {
+        "key": "SUPABASE_SERVICE_ROLE_KEY",
+        "scope": "server_only",
+        "status": "pending",
+        "note": "Supabase > Settings > API > service_role 키. 절대 NEXT_PUBLIC_ 접두사 금지"
+      },
+      {
+        "key": "UPLOAD_SECRET_TOKEN",
+        "scope": "server_only",
+        "status": "ready",
+        "note": "2026-07-09 생성완료(openssl rand -hex 32, 64자). .env.local+uploader/config.json 동기화. Vercel 입력 필요(운영자). 채팅노출→배포전 rotate 권장"
+      },
+      {
+        "key": "GOOGLE_CLIENT_SECRET",
+        "scope": "server_only",
+        "status": "pending",
+        "note": "GCP 콘솔 > API 및 서비스 > 사용자 인증 정보에서 확인"
+      },
+      {
+        "key": "GOOGLE_CLIENT_ID",
+        "scope": "server_only",
+        "status": "ready",
+        "note": "573377079589-ie6dhvkhmqlihhjsmb1rrl5dhh49jn2u.apps.googleusercontent.com"
+      },
+      {
+        "key": "ADMIN_EMAILS",
+        "scope": "server_only",
+        "status": "ready",
+        "note": "kwk1020kr@gmail.com (복수 시 쉼표 구분)"
+      },
+      {
+        "key": "NEXT_PUBLIC_SUPABASE_URL",
+        "scope": "public",
+        "status": "ready",
+        "note": "https://orxxyzdjvcfrptoxippr.supabase.co"
+      },
+      {
+        "key": "NEXT_PUBLIC_SUPABASE_ANON_KEY",
+        "scope": "public",
+        "status": "ready",
+        "note": "sb_publishable_al-tH42y566SRCkeqCkLWg_w4q7QtrR"
+      },
+      {
+        "key": "RESEND_API_KEY",
+        "scope": "server_only",
+        "status": "ready",
+        "note": "2026-07-10 운영자 설정(.env.local + Vercel Redeploy). 이메일 어댑터(lib/email.ts)가 사용. ⚠️채팅 노출→rotate 권장. ※EMAIL_FROM 커스텀 도메인은 Resend 도메인 인증 필요(미인증 시 onboarding@resend.dev)"
+      },
+      {
+        "key": "CRON_SECRET",
+        "scope": "server_only",
+        "status": "ready",
+        "note": "2026-07-10 운영자 설정(Vercel Prod/Preview + .env.local='securi-strcron'). /api/cron/* 인증용. Vercel Cron 이 Authorization: Bearer 로 호출. 더 긴 랜덤값 권장"
+      },
+      {
+        "key": "NEXT_PUBLIC_GISCUS_REPO / _REPO_ID / _CATEGORY / _CATEGORY_ID",
+        "scope": "public",
+        "status": "in_progress",
+        "note": "2026-07-10 .env.local 4개 설정 완료(로컬 /board 활성 확인). ▶Vercel 에도 4개 추가+Redeploy 필요(프로덕션 활성화). 값: mannung20/starstock, R_kgDOTQjm7Q, Announcements, DIC_kwDOTQjm7c4DA1j-"
+      },
+      {
+        "key": "NEXT_PUBLIC_KAKAO_JS_KEY",
+        "scope": "public",
+        "status": "pending",
+        "note": "Phase 3 추천하기 카카오 공유용. 카카오 개발자콘솔 > 앱 키 > JavaScript 키. 섹션 17-11"
+      }
+    ]
+  },
+
+  "database": {
+    "tables": [
+      {
+        "name": "stocks",
+        "priority": "required",
+        "status": "pending",
+        "key_fields": ["id", "rank(1-10 UNIQUE)", "stock_code", "stock_name", "current_price", "open_price", "high_price", "low_price", "target_price", "stop_price", "entry_price", "entry_confirmed", "status(buy/hold/sell)", "memo", "is_visible", "entry_date", "updated_at"],
+        "post_create": [
+          "rank 1~10 빈 행 미리 INSERT",
+          "entry_price/entry_confirmed 컬럼 포함 (섹션 15-9, 매수기준가 자동 확정)"
+        ]
+      },
+      {
+        "name": "profiles",
+        "priority": "required",
+        "status": "pending",
+        "key_fields": ["id(UUID, auth.users 참조)", "email", "display_name", "avatar_url", "role(free/vip/admin)", "is_banned", "memo", "joined_at", "last_login", "referral_code(UNIQUE, lazy 생성)", "referred_by(profiles 참조)", "email_verified", "email_notify"],
+        "post_create": [
+          "Auth 트리거 생성: 로그인 시 profiles 자동 INSERT (role='free')",
+          "referral_code는 가입 트리거가 아닌 프로필 최초 접속 시 lazy 생성 (기존 회원 포함)",
+          "email_notify 기본 true (섹션 16-7), email_verified 기본 false"
+        ]
+      },
+      {
+        "name": "subscriptions",
+        "priority": "required",
+        "status": "pending",
+        "key_fields": ["id", "user_id", "plan", "start_date", "end_date(NULL=무기한)", "payment_method", "payment_ref", "amount_krw", "processed_by", "expiry_d3_notified", "expiry_d0_notified", "created_at"],
+        "post_create": [
+          "expiry_d3_notified/d0_notified: Cron이 false일 때만 발송 후 true 업데이트 (섹션 4-2, v2.9)",
+          "구독 연장(새 행 INSERT) 시 두 플래그 자동 false 초기화"
+        ]
+      },
+      {
+        "name": "notices",
+        "priority": "required",
+        "status": "pending",
+        "key_fields": ["id", "title", "content", "category(notice/market/performance/event)", "is_pinned", "is_hidden", "view_count", "author_id", "created_at", "updated_at"]
+      },
+      {
+        "name": "upload_logs",
+        "priority": "required",
+        "status": "pending",
+        "key_fields": ["id", "action_type(upload/admin_action)", "source_ip", "uploaded_at", "status(success/failed/partial)", "records", "error_msg", "admin_id", "action_desc"],
+        "post_create": [
+          "v2.6: admin_logs 별도 테이블 제거 → upload_logs 통합. action_type으로 구분 (섹션 4-2 ⑤, 6-3)"
+        ]
+      },
+      {
+        "name": "admin_whitelist",
+        "priority": "required",
+        "status": "pending",
+        "key_fields": ["id", "email(UNIQUE)", "memo", "added_at"],
+        "post_create": [
+          "kwk1020kr@gmail.com INSERT 필수"
+        ]
+      },
+      {
+        "name": "display_config",
+        "priority": "required",
+        "status": "pending",
+        "key_fields": ["id", "role(guest/free/vip)", "column_key", "is_visible", "display_order", "label", "updated_by", "updated_at", "UNIQUE(role,column_key)"],
+        "post_create": [
+          "섹션 4-5 / 14-3 기준 role×column_key 기본값 INSERT (guest 8행, free 8행, vip 11행)",
+          "rank/stock_name/current_price는 숨김 금지(필수 식별자). guest의 target/stop_price는 열 표시하되 API null 반환"
+        ]
+      },
+      {
+        "name": "site_config",
+        "priority": "required",
+        "status": "pending",
+        "key_fields": ["key(PK)", "value", "updated_by", "updated_at"],
+        "post_create": [
+          "stock_layout='card' 초기값 INSERT (섹션 14-8-2)",
+          "추천 관련 10개 키 INSERT: referral_enabled(true), milestone_1_count/days(3/14), milestone_2(7/30), milestone_3(15/60), referee_days(7), repeat_count(5), repeat_days(14)",
+          "site_config 저장 키 전체: service_name/logo_*/theme/maintenance_*/footer_*/nav_show_*/guest_visible_count/free_visible_count/stock_layout/upload_interval_default (admin 목업 site_config 표)",
+          "※ entry_breakout_ratio/entry_candle_count는 site_config 제외 → config.json 직접 편집"
+        ]
+      },
+      {
+        "name": "stock_history",
+        "priority": "optional",
+        "status": "pending",
+        "key_fields": ["id", "stock_code", "stock_name", "recommend_date", "close_date", "entry_price", "exit_price", "return_rate", "result(profit/loss/hold/cancel)", "notes", "created_at"]
+      },
+      {
+        "name": "referral_logs",
+        "priority": "optional",
+        "status": "pending",
+        "key_fields": ["id", "referrer_id", "referee_id(UNIQUE, 1인 중복 방지)", "referee_email(마스킹 저장)", "joined_at", "is_read"],
+        "post_create": [
+          "referee_id UNIQUE: 한 사람은 한 명의 추천인에게만 카운트 (섹션 4-2 ⑩)"
+        ]
+      },
+      {
+        "name": "referral_rewards",
+        "priority": "optional",
+        "status": "pending",
+        "key_fields": ["id", "referrer_id", "milestone(1~3=단계, 4+=반복, 0=피추천인, 99+=수동)", "reward_days", "reward_type(milestone/repeat/referee/manual)", "rewarded_at", "UNIQUE(referrer_id,milestone)"],
+        "post_create": [
+          "UNIQUE(referrer_id, milestone): 동일 milestone 중복 지급 완전 차단 (섹션 4-2 ⑪)"
+        ]
+      },
+      {
+        "name": "posts",
+        "priority": "optional",
+        "status": "skipped",
+        "note": "Giscus 선택으로 불필요"
+      },
+      {
+        "name": "comments",
+        "priority": "optional",
+        "status": "skipped",
+        "note": "Giscus 선택으로 불필요"
+      }
+    ],
+    "triggers": [
+      {
+        "name": "on_auth_user_created",
+        "status": "pending",
+        "description": "auth.users INSERT 시 profiles 테이블에 role='free'로 자동 행 생성 (last_login UPDATE 포함)"
+      }
+    ],
+    "functions": [
+      {
+        "name": "process_referral (Supabase RPC)",
+        "status": "completed",
+        "description": "가입 콜백 단일 트랜잭션: referral_logs INSERT + referral_rewards INSERT + subscriptions UPSERT 원자성 보장 (섹션 17-4)",
+        "note": "2026-07-10 운영자 05 실행완료+비파괴 스모크(invalid_code) 검증. granted 배열 반환 추가(이번 지급 보상 [{user,days,reason}])→콜백에서 순회하여 referralRewardEmail 발송. mask_email/grant_vip_days 헬퍼 포함, service_role 만 execute. 구글2계정 실 E2E는 운영자",
+        "checklist": [
+          {"item": "referred_by IS NULL + 자기추천 방지 + ref 유효성(is_banned=false) 검증", "status": "completed"},
+          {"item": "피추천인 웰컴 보상 VIP 7일 지급 (reward_type='referee', milestone=0)", "status": "completed"},
+          {"item": "추천인 마일스톤 1~3단계 체크 (3명/14일, 7명/30일, 15명/60일)", "status": "completed"},
+          {"item": "3단계 초과 후 반복 지급 (5명마다 VIP 14일, milestone 4,5,6...)", "status": "completed"},
+          {"item": "subscriptions 연장 공통 함수 (신규생성/end_date 연장/NULL 무기한 유지 분기)", "status": "completed"}
+        ]
+      }
+    ],
+    "rls_policies": [
+      {
+        "table": "stocks",
+        "status": "pending",
+        "rules": [
+          "비회원(anon): rank = 1 만 SELECT",
+          "free: rank <= 3 SELECT",
+          "vip: 전체 SELECT",
+          "INSERT/UPDATE/DELETE: service_role 키만 허용"
+        ]
+      },
+      {
+        "table": "profiles",
+        "status": "pending",
+        "rules": [
+          "본인(auth.uid()=id): SELECT/UPDATE 허용",
+          "admin role: 전체 SELECT/UPDATE 허용"
+        ]
+      },
+      {
+        "table": "subscriptions",
+        "status": "pending",
+        "rules": [
+          "본인: 자기 row SELECT",
+          "admin role: 전체 SELECT/INSERT/UPDATE"
+        ]
+      },
+      {
+        "table": "notices",
+        "status": "pending",
+        "rules": [
+          "전체: SELECT 허용",
+          "admin role만: INSERT/UPDATE/DELETE 허용"
+        ]
+      },
+      {
+        "table": "upload_logs",
+        "status": "pending",
+        "rules": [
+          "service_role만: INSERT 허용",
+          "admin role: SELECT 허용"
+        ]
+      },
+      {
+        "table": "admin_whitelist",
+        "status": "pending",
+        "rules": [
+          "service_role만: 전체 접근"
+        ]
+      },
+      {
+        "table": "display_config",
+        "status": "pending",
+        "rules": [
+          "전체: SELECT 허용 (공개 설정값)",
+          "service_role만: INSERT/UPDATE/DELETE 허용 (섹션 14-7)"
+        ]
+      },
+      {
+        "table": "site_config",
+        "status": "pending",
+        "rules": [
+          "전체: SELECT 허용",
+          "service_role만: INSERT/UPDATE 허용 (섹션 14-8-2)"
+        ]
+      },
+      {
+        "table": "referral_logs",
+        "status": "pending",
+        "rules": [
+          "SELECT: referrer_id = auth.uid() (본인 추천 현황만)",
+          "INSERT: service_role만 (가입 콜백 서버사이드)",
+          "UPDATE: referrer_id = auth.uid() (is_read 업데이트)"
+        ]
+      },
+      {
+        "table": "referral_rewards",
+        "status": "pending",
+        "rules": [
+          "SELECT: referrer_id = auth.uid()",
+          "INSERT: service_role만"
+        ]
+      }
+    ]
+  },
+
+  "excel_uploader": {
+    "language": "Python",
+    "file": "starstock_uploader.py",
+    "config_file": "config.json",
+    "tracker_file": "tracker.json",
+    "target_hts": "eBest증권 (xingAPI DDE, 서버명 EtkDS / 토픽 eds)",
+    "excel_file": "STARSTOCK_MASTER.xlsm",
+    "excel_sheet": "MASTER",
+    "data_start_row": 11,
+    "data_end_row": 110,
+    "status_cell": "P1",
+    "timestamp_cell": "P2",
+    "interval_cell": "P3",
+    "excel_columns": {
+      "A": "번호(자동채번,잠금)", "B": "종목코드(입력)", "C": "종목명(입력)",
+      "D": "현재가(DDE)", "E": "시가(DDE)", "F": "고가(DDE)", "G": "저가(DDE)",
+      "H": "목표가(입력)", "I": "손절가(입력)", "J": "추천상태(드롭다운)", "K": "투자포인트(입력)",
+      "L": "전일고가(장마감 15:30 F열 복사, DDE 미지원)", "M": "매수기준가(Python 자동기입,잠금)"
+    },
+    "status": "pending",
+    "checklist": [
+      {"item": "config.json 작성 (api_url, upload_token, excel_file, sheet_name, data_start_row/end_row, status/timestamp/interval_cell)", "status": "pending"},
+      {"item": "config.json entry 설정 추가 (entry_breakout_ratio 0.015, entry_candle_count 2, entry_check_interval_minutes 3, entry_reset_time '08:30', tracker_file)", "status": "pending"},
+      {"item": "config.json .gitignore에 추가 (GitHub 토큰 유출 방지)", "status": "completed"},
+      {"item": "config.example.json 작성 (빈 값으로 GitHub 포함용)", "status": "completed"},
+      {"item": "eBest xingAPI DDE 수식 엑셀 세팅 (=EtkDS|eds!'STOCK.[코드];항목명')", "status": "pending"},
+      {"item": "win32com.client 엑셀 연결 (pywin32)", "status": "pending"},
+      {"item": "엑셀 포커스 유지 로직 (win32gui.SetForegroundWindow, 백그라운드 DDE 갱신 중단 방지)", "status": "pending"},
+      {"item": "L열 전일고가: 15:30 장마감 시 F열(고가) 정적 복사 (copy_high_to_prev_high)", "status": "pending"},
+      {"item": "매수기준가 자동 확정: 전일고가×(1+1.5%) 돌파 + 3분봉 2봉 연속 → M열 기입 (섹션 15-2)", "status": "pending"},
+      {"item": "tracker.json 로드/저장 (count, entry, ts / session_date)", "status": "pending"},
+      {"item": "reset_daily_tracker: 08:30 count만 초기화 (entry_price·confirmed 유지)", "status": "pending"},
+      {"item": "check_entry_signal: 갭업 처리(최소 1봉 확인), 전일고가 0이면 스킵", "status": "pending"},
+      {"item": "DDE 유효성 검사: stock_code 6자리 숫자 확인", "status": "pending"},
+      {"item": "DDE 유효성 검사: current_price > 0 확인 (#N/A 방지)", "status": "pending"},
+      {"item": "돌파 확정 종목만 수집 (entry_price/entry_confirmed 페이로드 통합, PATCH 불필요)", "status": "pending"},
+      {"item": "timestamp 포함 JSON 생성 (datetime.utcnow().isoformat() + 'Z')", "status": "pending"},
+      {"item": "API 전송 실패 시 5초 대기 후 최대 3회 재시도", "status": "pending"},
+      {"item": "P1 셀 서버 상태 갱신 (🟢 연동중 / 🔴 토큰오류·시각오류 / 감시중-돌파없음)", "status": "pending"},
+      {"item": "P2 셀 최종 전송 시각 갱신", "status": "pending"},
+      {"item": "P3 셀 갱신 주기 콤보박스 → schedule 반복 실행 (변경 시 재시작 필요)", "status": "pending"},
+      {"item": "uploader.log 오류 기록 (append 모드)", "status": "pending"},
+      {"item": "실행 옵션: --once / --reset 지원", "status": "pending"}
+    ]
+  },
+
+  "api_endpoints": [
+    {
+      "id": "api-1",
+      "method": "POST",
+      "path": "/api/upload-stocks",
+      "description": "엑셀 데이터 수신 및 DB 저장 (핵심, entry_price/entry_confirmed 통합)",
+      "auth": "X-Upload-Token 헤더",
+      "status": "pending",
+      "checklist": [
+        {"item": "X-Upload-Token 헤더 검증", "status": "pending"},
+        {"item": "timestamp ±30초 검증 (리플레이 공격 방지, 408 반환)", "status": "pending"},
+        {"item": "stock_code 6자리 숫자 검증", "status": "pending"},
+        {"item": "current_price > 0 검증 (DDE #N/A 방지)", "status": "pending"},
+        {"item": "stocks 배열 길이 1~10 검증", "status": "pending"},
+        {"item": "status 값 buy/hold/sell 중 하나 검증", "status": "pending"},
+        {"item": "stock_code 변경 감지 → entry_date 갱신 로직", "status": "pending"},
+        {"item": "entry_price/entry_confirmed 페이로드 반영 (섹션 15-8, v2.11)", "status": "pending"},
+        {"item": "Upsert All 트랜잭션 처리 (onConflict: rank)", "status": "pending"},
+        {"item": "빈 rank 행 → is_visible=false UPDATE (DELETE 금지, is_visible 보존)", "status": "pending"},
+        {"item": "upload_logs INSERT (action_type='upload', 성공/실패)", "status": "pending"},
+        {"item": "Rate Limiting 분당 10회 (Vercel middleware)", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-2",
+      "method": "GET",
+      "path": "/api/stocks",
+      "description": "회원 등급별 종목 조회 (폴링 대상)",
+      "auth": "Supabase Auth 세션",
+      "status": "pending",
+      "checklist": [
+        {"item": "RLS 기반 등급별 자동 필터링", "status": "pending"},
+        {"item": "세션 없을 시 비회원 처리 (rank=1만 반환)", "status": "pending"},
+        {"item": "guest target/stop_price는 null 반환 (F12 우회 차단)", "status": "pending"},
+        {"item": "is_visible=false 종목 필터링 후 반환", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-3",
+      "method": "GET",
+      "path": "/api/stocks/status",
+      "description": "엑셀 연동 상태 확인 (마지막 업로드 시각)",
+      "auth": "없음 (공개)",
+      "status": "completed",
+      "note": "코드완료+실연동검증(2026-07-09). 트러블슈팅: Next Data Cache 가 admin fetch 를 URL캐싱→stale. lib/supabase/admin.ts custom fetch cache:'no-store' 로 해결",
+      "checklist": [
+        {"item": "upload_logs 최신 행에서 uploaded_at, status 반환", "status": "completed"}
+      ]
+    },
+    {
+      "id": "api-4",
+      "method": "PATCH",
+      "path": "/api/admin/users/[id]/role",
+      "description": "회원 등급 변경 (FREE↔VIP)",
+      "auth": "관리자 세션 + admin_whitelist 서버단 검증",
+      "status": "completed",
+      "note": "p3-3에서 구현. 2026-07-10 등급변경 성공 시 gradeChangeEmail 발송(best-effort, email_notify 존중) 추가",
+      "checklist": [
+        {"item": "admin_whitelist 이메일 서버단 검증 (프론트 검사만으론 불충분)", "status": "pending"},
+        {"item": "profiles.role UPDATE", "status": "pending"},
+        {"item": "subscriptions 이력 INSERT (start_date, end_date, processed_by)", "status": "pending"},
+        {"item": "upload_logs INSERT (action_type='admin_action')", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-5",
+      "method": "GET",
+      "path": "/api/admin/users",
+      "description": "전체 회원 목록 조회",
+      "auth": "관리자 세션",
+      "status": "pending",
+      "checklist": [
+        {"item": "admin_whitelist 검증", "status": "pending"},
+        {"item": "profiles 전체 목록 반환 (이메일, 등급, 가입일, 마지막 로그인, 메모)", "status": "pending"},
+        {"item": "이메일 미등록(email=null) 회원 플래그 포함", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-6",
+      "method": "GET/PATCH",
+      "path": "/api/admin/display-config",
+      "description": "등급별 열 표시 설정 조회/변경 (섹션 14-5)",
+      "auth": "관리자 세션",
+      "status": "pending",
+      "checklist": [
+        {"item": "GET: role×column_key 설정 목록 반환", "status": "pending"},
+        {"item": "PATCH: display_config UPSERT + updated_by 기록", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-7",
+      "method": "PATCH",
+      "path": "/api/admin/stocks/[rank]/visibility",
+      "description": "종목 행 숨김 토글 (섹션 14-5)",
+      "auth": "관리자 세션",
+      "status": "pending",
+      "checklist": [
+        {"item": "stocks.is_visible UPDATE (엑셀 업로드가 덮어쓰지 않음)", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-8",
+      "method": "GET",
+      "path": "/api/display-config?role=",
+      "description": "공개 열 표시 설정 (프론트 동적 렌더링용, 섹션 14-5)",
+      "auth": "없음 (공개)",
+      "status": "pending",
+      "checklist": [
+        {"item": "role별 columns 배열 반환, 캐시 5분", "status": "pending"},
+        {"item": "VIP 전용 열은 서버단 role 검증 후 필터링 (RLS 이중 확인)", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-9",
+      "method": "GET",
+      "path": "/api/site-config",
+      "description": "공개 사이트 설정 (레이아웃 등, 섹션 14-8-5)",
+      "auth": "없음 (공개)",
+      "status": "pending",
+      "checklist": [
+        {"item": "stock_layout 등 공개 키 반환, 캐시 5분", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-10",
+      "method": "PATCH",
+      "path": "/api/admin/site-config",
+      "description": "사이트 설정 변경 (레이아웃/기본정보/네비/운영설정, 섹션 14-8-5)",
+      "auth": "관리자 세션",
+      "status": "pending",
+      "checklist": [
+        {"item": "site_config UPSERT + updated_by 기록", "status": "pending"}
+      ]
+    },
+    {
+      "id": "api-11",
+      "method": "GET/POST",
+      "path": "/api/referral/me, /api/referral/read",
+      "description": "내 추천 현황 조회(lazy code 생성)/알람 읽음 처리 (섹션 17-7)",
+      "auth": "로그인 필수",
+      "status": "completed",
+      "note": "2026-07-09 코드완료+스모크(비로그인 401). app/api/referral/me + /read. RPC 불필요(테이블 직접). 로그인 세션 E2E 는 운영자 05 실행/구글로그인 후",
+      "checklist": [
+        {"item": "GET me: referral_code NULL이면 lazy 생성 후 응답", "status": "completed"},
+        {"item": "GET me: total_count, unread_count, logs(마스킹), rewards, next_milestone, repeat_info 반환", "status": "completed"},
+        {"item": "POST read: referral_logs.is_read=true 업데이트 (log_ids 또는 all)", "status": "completed"}
+      ]
+    },
+    {
+      "id": "api-12",
+      "method": "POST",
+      "path": "/api/auth/callback",
+      "description": "가입 콜백 - 추천 처리 서버사이드 (섹션 17-7)",
+      "auth": "OAuth 콜백",
+      "status": "completed",
+      "note": "2026-07-09 코드완료. app/auth/callback: 세션교환 후 ref쿠키 있으면 admin.rpc(process_referral) 호출(best-effort)+쿠키제거. self/중복/차단 검증은 RPC 내부. E2E 는 운영자 05 실행 후",
+      "checklist": [
+        {"item": "쿠키 ref 코드 읽기 → referrer profiles.id 조회", "status": "completed", "note": "referrer 조회는 RPC 내부(referral_code→id)"},
+        {"item": "self-referral 차단 + referred_by IS NULL 확인", "status": "completed", "note": "RPC 내부 검증"},
+        {"item": "process_referral RPC 호출 (단일 트랜잭션)", "status": "completed"}
+      ]
+    },
+    {
+      "id": "api-13",
+      "method": "DELETE",
+      "path": "/api/admin/comments/[id]",
+      "description": "악성 댓글 숨김 처리",
+      "auth": "관리자 세션",
+      "status": "skipped",
+      "note": "Giscus 선택으로 불필요"
+    }
+  ],
+
+  "pages": [
+    {"id": "page-1", "path": "/", "name": "메인 (종목 카드/테이블 10개, 등급별 차등)", "phase": 2, "status": "pending"},
+    {"id": "page-2", "path": "/login", "name": "구글 로그인", "phase": 2, "status": "pending"},
+    {"id": "page-3", "path": "/notice", "name": "공지사항 목록", "phase": 3, "status": "pending"},
+    {"id": "page-4", "path": "/notice/[id]", "name": "공지사항 상세", "phase": 3, "status": "pending"},
+    {"id": "page-5", "path": "/referral", "name": "추천하기 (비회원 포함 전체 공개, 섹션 17-11)", "phase": 3, "status": "pending"},
+    {"id": "page-6", "path": "/join", "name": "추천 URL 랜딩 (ref 쿠키 저장 후 /login)", "phase": 2, "status": "pending"},
+    {"id": "page-7", "path": "/profile", "name": "프로필 - 내 추천 현황 탭 (섹션 17-5)", "phase": 3, "status": "pending"},
+    {"id": "page-8", "path": "/history", "name": "과거 수익률 현황", "phase": 4, "status": "completed", "note": "2026-07-09 요약통계+이력테이블(색상/결과배지)+빈상태. SSR getPerformanceData"},
+    {"id": "page-9", "path": "/admin", "name": "관리자 대시보드", "phase": 3, "status": "pending"},
+    {"id": "page-10", "path": "/admin/users", "name": "회원 관리", "phase": 3, "status": "pending"},
+    {"id": "page-11", "path": "/admin/stocks", "name": "종목 수동 관리 (비상용 + is_visible 토글)", "phase": 3, "status": "pending"},
+    {"id": "page-12", "path": "/admin/notices", "name": "공지사항 작성/관리", "phase": 3, "status": "pending"},
+    {"id": "page-13", "path": "/admin/display", "name": "화면 설정 (레이아웃 유형 + 열 표시 설정, 섹션 14-4/14-8-4)", "phase": 3, "status": "pending"},
+    {"id": "page-14", "path": "/admin/site", "name": "사이트 설정 (기본정보/하단정보/네비게이션/운영설정 탭)", "phase": 3, "status": "pending"},
+    {"id": "page-15", "path": "/admin/history", "name": "관리자 수익률 이력 관리 (마감 입력/목록/삭제, PRD 외 추가)", "phase": 4, "status": "completed", "note": "2026-07-09 추가. /history 공개 현황을 채우는 입력 도구. 마감이력 폼(수익률 자동계산)+목록+삭제"}
+  ],
+
+  "ui_components": {
+    "common": [
+      {"component": "헤더 (로고 + 네비 + 등급 뱃지 GUEST/FREE/VIP + 로그인 버튼)", "status": "pending"},
+      {"component": "헤더 - 추천 알람 뱃지 🔔 (unread_count, 섹션 17-6)", "status": "completed"},
+      {"component": "헤더 - 추천하기 메뉴 (IntersectionObserver 히어로 이탈 후 표시)", "status": "completed", "note": "상시 NAV 노출로 단순화(IntersectionObserver 미적용)"},
+      {"component": "갱신 상태 바 (마지막 갱신 시각 + 폴링 카운트다운 도트)", "status": "pending"},
+      {"component": "하단 공지사항 최신 5개 미리보기 + 푸터(면책조항)", "status": "pending"}
+    ],
+    "main_page": [
+      {"component": "StockLayout.tsx - site_config 읽어 카드/테이블 분기 (섹션 14-8-3)", "status": "pending"},
+      {"component": "StockCardGrid (PC 2~3열, 모바일 1열) + StockCard + BlurCard", "status": "pending"},
+      {"component": "StockTable + StockRow + BlurRow (display_config 열 순서 반영)", "status": "pending"},
+      {"component": "카드/행 - 비회원 블러 + 자물쇠 + hover 문구", "status": "pending"},
+      {"component": "카드/행 - 무료회원 4~10번 블러 + VIP 유도 배너/버튼", "status": "pending"},
+      {"component": "상태 신호등 (🟢매수적기/🟡관망/🔴조심) + 투자포인트 한줄평", "status": "pending"},
+      {"component": "현재가 상승/하락 깜빡임 애니메이션 (▲/▼)", "status": "pending"},
+      {"component": "추천 N일째 표시 (entry_date 기반)", "status": "pending"},
+      {"component": "목표가(+남은상승에너지%) / 손절가(-하락위험%) 병기 (C안, 프론트 계산)", "status": "pending"},
+      {"component": "모바일보기 전환 버튼 + 테이블→압축카드 자동 전환(480px)", "status": "completed"}
+    ],
+    "referral_page": [
+      {"component": "히어로 섹션 (비로그인 가입 CTA / 로그인 추천 URL + 공유 버튼)", "status": "completed"},
+      {"component": "링크 복사 + 카카오톡 공유 버튼 (Kakao SDK)", "status": "completed", "note": "링크복사 완료, 카카오는 NEXT_PUBLIC_KAKAO_JS_KEY 설정 시 활성"},
+      {"component": "보상 구조 시각화 (피추천인 7일 + 마일스톤 3단계 + 반복)", "status": "completed"},
+      {"component": "내 추천 현황 (진행 게이지 + 알람 목록 + 보상 이력)", "status": "completed"}
+    ],
+    "optional_components": [
+      {"component": "상승에너지 게이지 바 (entry_confirmed=true일 때만, Phase 2)", "status": "pending"},
+      {"component": "게이지 색상 구간 전환 애니메이션 (파랑/노랑/빨강🔥/금색🎯)", "status": "pending"},
+      {"component": "블러 카드 hover 미스터리 박스 흔들림 효과 (Phase 4)", "status": "pending"},
+      {"component": "Giscus 댓글 위젯 (Phase 4)", "status": "completed", "note": "셸 완성(env 게이트), /board. 운영자 giscus 값 설정 시 활성"}
+    ]
+  },
+
+  "security_checklist": [
+    {"item": "Vercel 환경변수 필수 설정 완료 (server 5 + public 2, Phase 4: Resend, Phase 3: Kakao)", "status": "pending"},
+    {"item": "SUPABASE_SERVICE_ROLE_KEY NEXT_PUBLIC_ 접두사 사용 금지 확인", "status": "pending"},
+    {"item": "UPLOAD_SECRET_TOKEN 32자 이상 랜덤 생성", "status": "pending"},
+    {"item": "API 타임스탬프 ±30초 검증 구현 (리플레이 공격 방지)", "status": "pending"},
+    {"item": "Rate Limiting 구현 (분당 10회)", "status": "pending"},
+    {"item": "Supabase 전 테이블 RLS 활성화 확인", "status": "pending"},
+    {"item": "Supabase Auth 이메일/비밀번호 가입 비활성화 (구글만 허용)", "status": "pending"},
+    {"item": "Supabase Redirect URLs에 https://starstock.vercel.app/auth/callback 등록", "status": "pending"},
+    {"item": "CORS 도메인 제한 (와일드카드 * 금지)", "status": "pending"},
+    {"item": ".gitignore에 config.json, tracker.json, .env, .env.local 추가 확인", "status": "pending"},
+    {"item": "VIP/guest 데이터 서버단 필터링 확인 (CSS blur/null만으론 F12 우회 가능)", "status": "pending"},
+    {"item": "관리자 API admin_whitelist 서버단 이중 검증 (프론트 분기만으론 불충분)", "status": "pending"},
+    {"item": "관리자 페이지 경로 예측 어렵게 설정 (선택)", "status": "pending"},
+    {"item": "GitHub push 전 비밀키 노출 여부 최종 확인", "status": "pending"}
+  ],
+
+  "packages": {
+    "nextjs_required": [
+      "@supabase/supabase-js",
+      "@supabase/ssr",
+      "tailwindcss",
+      "typescript",
+      "@types/node"
+    ],
+    "nextjs_optional": [
+      "framer-motion (애니메이션)",
+      "recharts (수익률 차트)",
+      "resend (이메일 발송, Phase 4)",
+      "nanoid (referral_code 생성)",
+      "@radix-ui/react-* (shadcn/ui 기반)",
+      "@tailwindcss/typography"
+    ],
+    "python_required": [
+      "requests",
+      "schedule",
+      "pywin32"
+    ],
+    "python_optional": [
+      "openpyxl (엑셀 직접 읽기 대안)",
+      "python-dotenv"
+    ]
+  },
+
+  "phases": [
+    {
+      "phase": 1,
+      "name": "핵심 데이터 파이프라인",
+      "estimated_days": "1~2일",
+      "status": "pending",
+      "tasks": [
+        {"id": "p1-1", "task": "Supabase: stocks 테이블 생성 (entry_price/entry_confirmed 포함) + rank 1~10 빈 행 INSERT", "status": "pending"},
+        {"id": "p1-2", "task": "Supabase: profiles 테이블 생성 (email_notify 포함) + Auth 트리거 생성", "status": "pending"},
+        {"id": "p1-3", "task": "Supabase: subscriptions, notices, upload_logs, admin_whitelist 테이블 생성", "status": "pending"},
+        {"id": "p1-4", "task": "Supabase: admin_whitelist에 kwk1020kr@gmail.com INSERT", "status": "pending"},
+        {"id": "p1-5", "task": "Supabase: 전 테이블 RLS 정책 설정 (폴링 기반, Realtime 불필요)", "status": "pending"},
+        {"id": "p1-6", "task": "Vercel: 환경변수 설정 (server 5 + public 2)", "status": "pending"},
+        {"id": "p1-7", "task": "Next.js: POST /api/upload-stocks 구현 (토큰+타임스탬프+유효성+entry 통합+Upsert)", "status": "completed", "note": "코드완료+빌드검증(2026-07-27). lib/validation.ts+rate-limit.ts. 빈rank(공백코드)→is_visible=false. 런타임 E2E는 Supabase SQL 실행 후"},
+        {"id": "p1-8", "task": "Next.js: GET /api/stocks/status 구현", "status": "completed", "note": "코드완료. GET /api/stocks(api-2)도 함께 구현(등급별 RLS+비회원 목표/손절가 null)"},
+        {"id": "p1-9", "task": "Python: starstock_uploader.py (DDE 읽기+검증+매수기준가 확정+tracker+전송+재시도)", "status": "in_progress", "note": "코드완료. 2026-07-09 entry_confirmed=True payload 추가(누락버그 수정). API전송 경로 실연동 검증. 실제 DDE/win32com 현장연동은 운영자 Windows"},
+        {"id": "p1-10", "task": "Python: config.json (entry 설정 포함) + config.example.json + .gitignore 추가", "status": "completed", "note": "2026-07-09 완료: config.json upload_token 실값+.gitignore 차단(check-ignore 확인), config.example.json(빈값 템플릿, 커밋가능) 작성"},
+        {"id": "p1-11", "task": "Excel: 파일 구성 (A~M열 DDE 수식 + L열 전일고가 복사 + 버튼 + 조건부서식 + P3 콤보박스)", "status": "pending"},
+        {"id": "p1-12", "task": "E2E 테스트: 엑셀 → API → DB 데이터 정상 확인", "status": "in_progress", "note": "2026-07-09 업로더 동일 페이로드→API→DB→조회 실연동 검증완료(토큰401/시각408/정상200, upsert, status ok). 실제 엑셀+DDE 구간만 운영자 현장검증 남음"}
+      ]
+    },
+    {
+      "phase": 2,
+      "name": "사용자 화면 + 추천 기반(백엔드)",
+      "estimated_days": "2~3일",
+      "status": "pending",
+      "tasks": [
+        {"id": "p2-1", "task": "Next.js 프로젝트 초기 세팅 (shadcn/ui, tailwind, supabase client)", "status": "completed", "note": "web/ 분리 스캐폴딩 완료(2026-07-27). Next 14.2.35, Tailwind+shadcn 테마, @supabase/ssr 3종 클라이언트(client/server/admin), env 헬퍼, DB 타입, 미들웨어(세션갱신). npm build 통과. 파이썬·엑셀 uploader/ 이동. Vercel Root Directory=web 설정 필요"},
+        {"id": "p2-2", "task": "헤더 컴포넌트 (로고 + 네비 + 등급 뱃지 + 로그인 버튼)", "status": "completed", "note": "Header.tsx 클라이언트, onAuthStateChange로 등급뱃지/로그아웃"},
+        {"id": "p2-3", "task": "구글 OAuth 로그인 연동 (Supabase Auth) + /login", "status": "completed", "note": "/login signInWithOAuth + /auth/callback code교환"},
+        {"id": "p2-4", "task": "폴링 훅 구현 (GET /api/stocks setInterval N분) + 갱신 상태 바", "status": "completed", "note": "StocksView 폴링 + RefreshBar 카운트다운 도트"},
+        {"id": "p2-5", "task": "StockLayout 분기 + 종목 카드/테이블 컴포넌트 (등급별 차등 + 블러)", "status": "completed", "note": "StockLayout(card/table) + StockCardGrid/StockTable + LockedCard(login/vip blur)"},
+        {"id": "p2-6", "task": "현재가 변동 애니메이션 + 상태 신호등 (🟢/🟡/🔴)", "status": "completed", "note": "PriceChange flash-up/down, StatusSignal"},
+        {"id": "p2-7", "task": "entry_date 기반 추천 N일째 + 목표가/손절가 %병기 + 상승에너지 게이지", "status": "completed", "note": "lib/stock-calc + EnergyGauge 구간색상"},
+        {"id": "p2-8", "task": "하단 공지사항 최신 5개 미리보기", "status": "completed", "note": "NoticesPreview"},
+        {"id": "p2-9", "task": "모바일 반응형 레이아웃 + 모바일보기 전환 버튼", "status": "completed", "note": "2026-07-09 완료: Header 햄버거(☰) 드롭다운 메뉴 + 테이블→압축카드 480px 자동전환(StockLayout min-[480px] 분기, StockCardGrid 재사용) + StocksView '모바일 보기' 토글(테이블 레이아웃 sm 미만 노출). 빌드+홈HTML 요소 렌더 확인"},
+        {"id": "p2-10", "task": "추천 기반: profiles referral 컬럼 + referral_logs/rewards 테이블 + RLS", "status": "completed", "note": "01_schema(profiles.referral_code/referred_by + referral_logs/rewards 테이블+인덱스) + 03_rls(양 테이블 정책) 에 이미 포함, 운영자 실행완료(체크포인트#5). 확인: 2026-07-09"},
+        {"id": "p2-11", "task": "추천 기반: site_config 추천 10개 키 INSERT + /join 랜딩 + 쿠키 저장", "status": "completed", "note": "2026-07-09 완료: site_config 키(04_seed) + app/join/route.ts(ref 검증→httpOnly/SameSite=lax/30일 쿠키→/login). 스모크: 유효 ref 쿠키설정/잘못된 ref 거부 확인. lib/referral.ts(genReferralCode/isValidRefCode)"},
+        {"id": "p2-12", "task": "추천 기반: process_referral RPC + subscriptions 연장 함수 구현", "status": "completed", "note": "2026-07-10 운영자 05 실행완료+스모크검증(invalid_code). granted 반환 추가. 콜백 연동 완료. 구글2계정 실 E2E만 운영자"}
+      ]
+    },
+    {
+      "phase": 3,
+      "name": "관리자 페이지 + 추천 UI + 화면/사이트 설정",
+      "estimated_days": "2일",
+      "status": "pending",
+      "tasks": [
+        {"id": "p3-1", "task": "관리자 미들웨어: admin_whitelist 이메일 서버단 검증 (/admin/* 접근제어)", "status": "completed", "note": "lib/admin.getAdminContext(role/whitelist/env 3중) + layout 게이트. 스모크: /admin→307 /login"},
+        {"id": "p3-2", "task": "관리자 대시보드: 엑셀 연동 상태 + 통계 카드 + 이메일 미등록 회원 + 최근 로그", "status": "completed"},
+        {"id": "p3-3", "task": "회원 관리: 목록 조회 + 이메일 검색 + 등급 변경 모달 + 만료일 + 차단", "status": "completed", "note": "UsersTable + role/ban API, VIP 승급 시 subscriptions INSERT"},
+        {"id": "p3-4", "task": "공지사항 CRUD (작성/수정/삭제/상단고정)", "status": "completed", "note": "NoticesManager + notices API. 리치에디터는 textarea(MVP)"},
+        {"id": "p3-5", "task": "종목 수동 관리: 인라인 편집 + is_visible 토글 (PATCH visibility API)", "status": "completed"},
+        {"id": "p3-6", "task": "화면 설정 /admin/display: 레이아웃 유형 토글 + site_config API", "status": "completed"},
+        {"id": "p3-7", "task": "화면 설정 - 열 표시 설정 (display_config 테이블 + GET/PATCH API + 초기값)", "status": "completed", "note": "드래그 순서변경은 미구현(선택)"},
+        {"id": "p3-8", "task": "사이트 설정 /admin/site: 기본정보/하단정보/네비게이션/운영설정 4개 탭", "status": "completed", "note": "footer_links 편집기/토큰 재발급은 MVP 제외"},
+        {"id": "p3-9", "task": "추천 UI: GET /api/referral/me (lazy code) + /referral 페이지 (히어로/보상/현황)", "status": "completed", "note": "2026-07-09 완료: app/referral/page + ReferralPanel(URL복사/공유/진행게이지/알람/보상이력) + RewardStructure(site_config 반영). 게스트 렌더 스모크 통과(가입CTA+보상수치). 로그인 대시보드 E2E는 구글로그인 필요"},
+        {"id": "p3-10", "task": "추천 UI: 헤더 추천하기 메뉴(IntersectionObserver) + 알람 뱃지 + POST read", "status": "completed", "note": "2026-07-09 완료: 헤더 NAV '추천하기' + 🔔 알람뱃지(unread /api/referral/me) + ReferralPanel '모두 읽음'(POST read). ※ IntersectionObserver 히어로이탈 표시조건은 상시노출로 단순화(MVP)"},
+        {"id": "p3-11", "task": "카카오 공유 SDK 연동 (NEXT_PUBLIC_KAKAO_JS_KEY)", "status": "completed", "note": "2026-07-09 KakaoShareButton 구현(SDK 동적로드, sendDefault). NEXT_PUBLIC_KAKAO_JS_KEY 미설정 시 자동 숨김→링크복사로 대체(graceful). 운영자 키 설정 시 활성화"}
+      ]
+    },
+    {
+      "phase": 4,
+      "name": "부가 기능 + 이메일 발송",
+      "estimated_days": "2~3일",
+      "status": "pending",
+      "tasks": [
+        {"id": "p4-1", "task": "Giscus 댓글 위젯 연동 (스크립트 태그 삽입)", "status": "completed", "note": "2026-07-09 셸 완성: components/board/GiscusComments(NEXT_PUBLIC_GISCUS_* 4개 게이트, 설정 시 client.js 주입/미설정 시 안내) + app/board/page(NAV '게시판' 404 해소). .env.local.example 문서화. 검증: /board 200+placeholder+스크립트 미로드. 운영자 giscus.app repo연결→4개 값 설정 시 활성"},
+        {"id": "p4-2", "task": "과거 수익률 현황판 (stock_history 테이블 + /history 페이지)", "status": "completed", "note": "2026-07-09 완료: (공개) app/history/page + getPerformanceData(전체/마감/승률/평균수익률), 이익빨강/손실파랑/결과배지/빈상태. (관리자) /admin/history 입력UI 추가: 마감이력 폼(수익률 자동계산)+목록+삭제, API POST/DELETE(getAdminContext+logAdminAction), 사이드바 '수익률 이력'. 검증: /history 테스트행 삽입→렌더→삭제, admin 접근게이트(307/403) 스모크. admin CRUD 실동작은 구글 관리자 로그인 필요(운영자)"},
+        {"id": "p4-3", "task": "블러 카드 hover 미스터리 박스 효과 (CSS animation)", "status": "pending"},
+        {"id": "p4-4", "task": "Resend 설정 (RESEND_API_KEY) + subscriptions expiry 플래그 컬럼", "status": "completed", "note": "2026-07-10 provider무관 어댑터 lib/email.ts(Resend/Gmail/no-op) + email-templates + /api/admin/email-test. RESEND_API_KEY 운영자 설정완료. 실동작 검증: 관리자 테스트발송→Resend sent(email_logs id=2 기록). 발송로그 email_logs(06 SQL, 본문전문) + /admin/email 페이지 추가. expiry 플래그 컬럼 기존재"},
+        {"id": "p4-5", "task": "VIP 만료 D-3/D-0 알림 Cron (expiry_d3/d0_notified 중복 방지)", "status": "completed", "note": "2026-07-10 코드완료+런타임검증: app/api/cron/vip-expiry (D-3/D-0→미발송 건만 sendEmail→플래그, email_notify 존중). CRON_SECRET 인증. 검증: 헤더없음→401, Bearer+?dryRun=1→200({downgraded:1,notified_d3:0,notified_d0:0}, 변경없음). ▶배포 후 Vercel Cron 실스케줄 확인만 남음(운영자)"},
+        {"id": "p4-6", "task": "등급 변경 완료 알림 + 피추천인 가입/마일스톤 보상 이메일 (RPC 연동)", "status": "completed", "note": "2026-07-10 완료: 등급변경 API gradeChangeEmail + 콜백에서 process_referral granted 배열 순회→referralRewardEmail(수혜자별 email_notify 존중). RPC에 granted 반환 추가. build+05/06 실행검증. email_logs 기록+/admin/email 표시. 실메일 수신 E2E는 운영자(구글 로그인/도메인 인증)"},
+        {"id": "p4-7", "task": "관리자 추천 설정 UI (운영설정 탭) + 대시보드 추천 통계 + 수동 보상", "status": "completed", "note": "2026-07-10 완료: (1) SiteManager '추천설정' 탭 신규 — referral 10개 키(enabled/referee_days/milestone 1~3 count·days/repeat count·days) 편집 UI, 기존 PATCH /api/admin/site-config 재사용. (2) 대시보드(admin/page) 추천 통계 섹션 — getReferralStats(server-data): 총/이달 추천가입·지급보상 건수·일수 카드 4개 + 상위 추천인 TOP5. (3) 수동 보상 — POST /api/admin/referral/grant(referral_rewards milestone 99+/reward_type=manual 이력 + grant_vip_days RPC 지급 + logAdminAction) + UsersTable 행별 'VIP지급' 버튼→GrantModal(일수·빠른선택 7/14/30/60·사유). types.ts에 grant_vip_days Functions 추가. npm run build 통과. 실동작 E2E는 구글 관리자 로그인 필요(운영자)"},
+        {"id": "p4-8", "task": "VIP 만료 자동 처리 Cron (선택, profiles.role='free' 자동 전환)", "status": "completed", "note": "2026-07-10 코드완료+런타임검증: app/api/cron/vip-expiry 통합. role='vip'인데 활성구독 없으면 free 강등. vercel.json crons(매일0시). dryRun 검증 완료(downgraded:1 감지, 변경없음). ▶배포 후 Vercel Cron 실스케줄 확인만 남음(운영자)"}
+      ]
+    },
+    {
+      "phase": 5,
+      "name": "보안 점검 및 런칭",
+      "estimated_days": "0.5일",
+      "status": "pending",
+      "tasks": [
+        {"id": "p5-1", "task": "security_checklist 전체 항목 완료 확인", "status": "pending"},
+        {"id": "p5-2", "task": "Vercel 환경변수 최종 확인", "status": "pending"},
+        {"id": "p5-3", "task": "RLS 동작 테스트: 비회원(rank=1), 무료(rank≤3), VIP(전체) 각각 확인", "status": "pending"},
+        {"id": "p5-4", "task": "모바일 실기기 테스트 (iPhone/Android)", "status": "pending"},
+        {"id": "p5-5", "task": "GitHub 코드 비밀키 노출 여부 최종 확인", "status": "pending"},
+        {"id": "p5-6", "task": "starstock.vercel.app 최종 접속 및 전체 기능 확인", "status": "pending"}
+      ]
+    }
+  ],
+
+  "progress_summary": {
+    "total_phase_tasks": 51,
+    "completed": 33,
+    "in_progress": 2,
+    "skipped": 2,
+    "pending": 14,
+    "completion_rate": "65%",
+    "current_phase": 4,
+    "last_session_note": "2026-07-10 세션(p4-7): 관리자 추천 3종 완료 — (1) /admin/site '추천설정' 탭(referral 10키 편집, site-config PATCH 재사용) (2) /admin 대시보드 추천 통계 섹션(getReferralStats: 총/이달 추천가입·보상 건수/일수 4카드 + 상위추천인 TOP5) (3) 수동보상 POST /api/admin/referral/grant(referral_rewards manual milestone 99+ + grant_vip_days RPC + logAdminAction) + UsersTable 행별 'VIP지급' 버튼/GrantModal. types.ts grant_vip_days Functions 추가. npm build 통과(신규 라우트 컴파일). 실동작 E2E는 구글 관리자 로그인 운영자. ※ 이전 세션: p4-6 이메일 알림 연결 완료(등급변경 API gradeChangeEmail + 콜백 process_referral granted 배열 순회→referralRewardEmail). RPC granted 반환 추가. Cron p4-5/p4-8 런타임검증 완료(401/dryRun200/downgraded:1). 추천 RPC 05·email_logs 06 운영자 실행+검증(insert201/read/delete204, 스키마 9컬럼 일치). 신규: email_logs 테이블(본문 전문 저장)+/admin/email 발송로그 페이지(건수+본문뷰어+테스트발송). 실동작 검증: 관리자 테스트발송→Resend sent(email_logs id=2). 승인프롬프트 절감: settings.local.json allowlist. 서버 실행 bat 4종(start/stop/status/rebuild). ※ 남은 CLAUDE 코드작업: p4-7(관리자 추천설정 UI+대시보드 추천통계+수동보상), p4-3(블러 미스터리박스 CSS·일부 완료). 나머지 전부 운영자 게이트: Vercel 배포(env·Root=web·SQL 반영), Resend 도메인인증+EMAIL_FROM(실회원 발송), Giscus Vercel 4키, Kakao 키, 엑셀+eBest DDE 현장연동, 구글 2계정/관리자 E2E, Phase5 보안·런칭."
+  }
+}

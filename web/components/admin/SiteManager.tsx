@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-type Tab = "basic" | "footer" | "nav" | "ops" | "referral" | "alert";
+type Tab = "basic" | "footer" | "nav" | "ops" | "referral" | "alert" | "domain";
 const TABS: { key: Tab; label: string }[] = [
   { key: "basic", label: "기본정보" },
   { key: "footer", label: "하단정보" },
@@ -14,6 +14,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "ops", label: "운영설정" },
   { key: "referral", label: "추천설정" },
   { key: "alert", label: "매수알림" },
+  { key: "domain", label: "도메인" },
 ];
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
@@ -33,6 +34,7 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [imgPreview, setImgPreview] = useState(false); // 매수알림 이미지 미리보기 토글
+  const [domainSaved, setDomainSaved] = useState(false); // 도메인 탭: 저장 성공 시 "다음 절차" 노출
 
   const set = (k: string, v: string) => setC((p) => ({ ...p, [k]: v }));
   const val = (k: string, d = "") => c[k] ?? d;
@@ -51,6 +53,7 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
     setSaving(false);
     setMsg(res.ok ? "저장되었습니다." : "저장 실패");
     if (res.ok) router.refresh();
+    return res.ok;
   }
 
   // 추천 숫자 키: 빈값/음수/비정상 입력이 site_config 에 문자열로 저장되면
@@ -63,6 +66,24 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
     referral_milestone_3_count: 15, referral_milestone_3_days: 60,
     referral_repeat_count: 5, referral_repeat_days: 14,
   };
+
+  // 대표 주소(site_url): 저장 직전 정규화.
+  // - 빈값 허용(→ 이메일 URL 은 코드 폴백: NEXT_PUBLIC_SITE_URL → 영구주소 사용)
+  // - 값이 있으면 https:// 로 시작해야 하고, 끝 슬래시 제거(잘못된 절대URL 방지)
+  async function saveDomain() {
+    let url = (c["site_url"] ?? "").trim();
+    if (url) {
+      url = url.replace(/\/+$/, ""); // 끝 슬래시 제거
+      if (!/^https:\/\//i.test(url)) {
+        setMsg("대표 주소는 https:// 로 시작해야 합니다. (비우면 기본주소 사용)");
+        return;
+      }
+    }
+    const fixed = { ...c, site_url: url };
+    setC(fixed);
+    const ok = await save(["site_url"], fixed);
+    setDomainSaved(ok); // 성공 시 "다음 절차" 체크리스트 노출
+  }
 
   async function saveReferral() {
     const fixed: Record<string, string> = { ...c };
@@ -81,7 +102,7 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
         {TABS.map((t) => (
           <button
             key={t.key}
-            onClick={() => { setTab(t.key); setMsg(null); }}
+            onClick={() => { setTab(t.key); setMsg(null); setDomainSaved(false); }}
             className={cn(
               "px-4 py-2 text-sm",
               tab === t.key ? "border-b-2 border-primary font-semibold" : "text-muted-foreground"
@@ -148,7 +169,7 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
 
           {tab === "nav" && (
             <>
-              <p className="text-sm text-muted-foreground">상단 메뉴 표시 항목 (체크 해제 시 즉시 숨김)</p>
+              <p className="text-sm text-muted-foreground">상단 메뉴 표시 항목 (체크 해제 시 숨김)</p>
               {[
                 { k: "nav_show_notice", label: "공지사항" },
                 { k: "nav_show_board", label: "게시판" },
@@ -159,6 +180,10 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
                 </label>
               ))}
               <p className="text-xs text-muted-foreground">※ 홈 메뉴는 항상 표시(고정)</p>
+              <p className="text-xs text-muted-foreground">
+                ※ 여기는 <b>상단 메뉴 링크</b> 표시/숨김입니다. 홈 화면의 &lsquo;매수신호&rsquo;·&lsquo;수익률 현황&rsquo;
+                <b>섹션</b> 표시는 각 관리 화면에서 조절합니다.
+              </p>
               <Button onClick={() => save(["nav_show_notice", "nav_show_board", "nav_show_history"])} disabled={saving}>저장</Button>
             </>
           )}
@@ -306,6 +331,97 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
               </div>
 
               <Button onClick={() => save(["buy_alert_image_enabled", "buy_alert_image_url", "buy_alert_image_duration", "buy_alert_sound_enabled", "buy_alert_sound_url"])} disabled={saving}>저장</Button>
+            </>
+          )}
+
+          {tab === "domain" && (
+            <>
+              <div className="rounded-md border bg-muted/40 p-3 space-y-1 text-xs text-muted-foreground">
+                <p>· 이 값은 <b>이메일 링크·대표 URL 표시용</b>입니다. (비우면 기본주소 자동)</p>
+                <p>· <b>실제 접속 도메인 변경은 여기가 아니라 Vercel &gt; Domains</b> 에서 합니다.</p>
+                <p>· 도메인을 바꿨다면 ①Vercel ②Supabase Redirect URLs ③업로더 config.json 도
+                  함께 바꿔야 완전 적용됩니다. (순서: PRD &lsquo;도메인 교체 런북&rsquo; 참고)</p>
+              </div>
+
+              <Field label="대표 주소 (외부 도메인 우선)">
+                <input
+                  className={inputCls}
+                  placeholder="https://hddrecoveryservice.com"
+                  value={val("site_url")}
+                  onChange={(e) => { set("site_url", e.target.value); setDomainSaved(false); }}
+                />
+              </Field>
+              <p className="text-xs text-muted-foreground">
+                비워두면 기본주소(영구주소)를 사용합니다. 이메일 링크·대표 URL 에 사용됩니다.
+              </p>
+
+              <Button onClick={saveDomain} disabled={saving}>저장</Button>
+
+              {/* 도메인 교체 절차: 저장 전엔 흐리게(미리보기), 저장 성공 시 선명하게 강조 */}
+              <div
+                className={cn(
+                  "rounded-md border p-3 space-y-2 text-sm transition-opacity",
+                  domainSaved
+                    ? "border-green-600/40 bg-green-50 opacity-100 dark:bg-green-950/30"
+                    : "border-muted bg-muted/20 opacity-60"
+                )}
+              >
+                <p
+                  className={cn(
+                    "font-medium",
+                    domainSaved ? "text-green-700 dark:text-green-400" : "text-muted-foreground"
+                  )}
+                >
+                  {domainSaved
+                    ? "✅ 대표 주소를 저장했습니다. 실제 접속 도메인까지 바꾸는 중이라면 이어서 진행하세요:"
+                    : "📋 도메인 교체 시 다음 절차 (미리보기 — 저장하면 활성화됩니다)"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  이 저장은 <b>이메일·대표 URL 표시</b>만 바꿉니다. <b>실제 접속 도메인</b>은
+                  바꾸려는 대상에 따라 아래 두 경우 중 해당 절차로 진행하세요:
+                </p>
+
+                {/* 케이스 A — 버셀 주소(.vercel.app) 변경 */}
+                <div className="rounded-md border bg-background/60 p-2.5 space-y-1">
+                  <p className="text-sm font-semibold">
+                    Ⓐ 버셀 주소(<code>…vercel.app</code>) 변경 <span className="text-xs font-normal text-muted-foreground">— 즉시 반영, DNS 불필요</span>
+                  </p>
+                  <ol className="list-decimal space-y-1 pl-5 text-sm">
+                    <li><b>Vercel &gt; Domains</b>: 짧은 별칭은 이름변경 불가 → <b>기존 별칭 삭제 후 새 이름 Add</b>
+                      → Primary 지정 (삭제~재생성 사이 이전 주소는 잠시 404)</li>
+                    <li><b>Supabase &gt; Redirect URLs</b>: 새 <code>…vercel.app</code> 주소 <code>{"/**"}</code> 추가
+                      (영구주소도 계속 유지)</li>
+                    <li><b>업로더</b>: <code>uploader/config.json</code> 의 <code>api_url</code> 교체 후 재시작</li>
+                  </ol>
+                  <p className="text-xs text-muted-foreground">
+                    ※ 프로젝트 이름 변경(rename)은 <b>영구주소까지 바뀌므로 원칙 금지</b>.
+                  </p>
+                </div>
+
+                {/* 케이스 B — 외부(커스텀) 도메인 변경 */}
+                <div className="rounded-md border bg-background/60 p-2.5 space-y-1">
+                  <p className="text-sm font-semibold">
+                    Ⓑ 외부(커스텀) 도메인 변경 <span className="text-xs font-normal text-muted-foreground">— DNS·SSL 자동, 수분~수시간</span>
+                  </p>
+                  <ol className="list-decimal space-y-1 pl-5 text-sm">
+                    <li><b>Vercel &gt; Domains</b>: 커스텀 도메인 Add → DNS 연결(네임서버=Vercel 권장)
+                      → SSL 자동 발급 대기 → Primary 지정</li>
+                    <li><b>접속 확인</b>: 브라우저 또는 <code>curl</code> 로 <code>https</code> 200 확인
+                      (SSL 발급까지 수분~수시간 걸릴 수 있음)</li>
+                    <li><b>Supabase &gt; Redirect URLs</b>: 커스텀 <code>{"/**"}</code> 추가 (영구주소도 유지)</li>
+                    <li><b>업로더</b>: <code>uploader/config.json</code> 의 <code>api_url</code> 교체 후 재시작</li>
+                  </ol>
+                  <p className="text-xs text-muted-foreground">
+                    ※ 도메인 등록업체에서 <b>auto-renew ON</b> 유지(만료 분실 방지). Vercel 은 이 도메인의
+                    Registrar 아님.
+                  </p>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  🛟 공통 안전판 — 문제 시 영구주소(<code>starstock-zionks-projects.vercel.app</code>)는
+                  절대 사라지지 않아 최후 접속수단입니다. (상세: PRD &lsquo;도메인 교체 런북&rsquo;)
+                </p>
+              </div>
             </>
           )}
 

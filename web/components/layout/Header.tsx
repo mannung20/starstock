@@ -8,14 +8,17 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import type { UserRole } from "@/lib/types";
 
-const NAV = [
+// cfg 가 있는 항목은 site_config 의 해당 키가 "false" 면 메뉴에서 숨김(관리자 "네비게이션" 탭).
+// cfg 없는 항목(홈·추천하기·기능개선요청)은 항상 표시.
+const NAV: { href: string; label: string; cfg?: string }[] = [
   { href: "/", label: "홈" },
-  { href: "/notice", label: "공지사항" },
+  { href: "/notice", label: "공지사항", cfg: "nav_show_notice" },
   { href: "/referral", label: "추천하기" },
-  { href: "/board", label: "게시판" },
-  { href: "/history", label: "수익률 현황" },
+  { href: "/board", label: "게시판", cfg: "nav_show_board" },
+  { href: "/history", label: "수익률 현황", cfg: "nav_show_history" },
   { href: "/feedback", label: "기능개선요청" },
 ];
+const NAV_CFG_KEYS = NAV.map((n) => n.cfg).filter((k): k is string => !!k);
 
 function GradeBadge({ role }: { role: UserRole | "guest" }) {
   if (role === "vip") return <Badge variant="vip">⭐VIP</Badge>;
@@ -41,6 +44,30 @@ export function Header({
   const [isAdmin, setIsAdmin] = useState<boolean>(initialIsAdmin);
   const [unread, setUnread] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [hiddenNav, setHiddenNav] = useState<Set<string>>(new Set()); // nav_show_*=false 인 cfg 키
+
+  // 관리자 "네비게이션" 탭 설정(site_config 공개 SELECT) 반영 → 해당 메뉴 숨김.
+  // ※ 초기엔 전부 표시(SSR) 후 값 로드 시 숨김 반영(관리자가 끈 항목만 잠깐 보였다 사라질 수 있음).
+  useEffect(() => {
+    let alive = true;
+    supabase
+      .from("site_config")
+      .select("key, value")
+      .in("key", NAV_CFG_KEYS)
+      .then(({ data }) => {
+        if (!alive) return;
+        const hide = new Set<string>();
+        for (const row of (data ?? []) as { key: string; value: string }[]) {
+          if (row.value === "false") hide.add(row.key);
+        }
+        setHiddenNav(hide);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [supabase]);
+
+  const nav = NAV.filter((n) => !n.cfg || !hiddenNav.has(n.cfg));
 
   useEffect(() => {
     const { data: sub } = supabase.auth.onAuthStateChange(async (_e, session) => {
@@ -88,7 +115,7 @@ export function Header({
         </Link>
 
         <nav className="hidden items-center gap-4 text-sm text-muted-foreground md:flex">
-          {NAV.map((n) => (
+          {nav.map((n) => (
             <Link key={n.href} href={n.href} className="hover:text-foreground">
               {n.label}
             </Link>
@@ -142,7 +169,7 @@ export function Header({
       {menuOpen && (
         <nav className="border-t bg-background md:hidden">
           <ul className="container flex flex-col py-2 text-sm">
-            {NAV.map((n) => (
+            {nav.map((n) => (
               <li key={n.href}>
                 <Link
                   href={n.href}

@@ -1,0 +1,18 @@
+{
+  "_주의": "이 파일은 커밋용 템플릿(빈 값)입니다. 복사하여 config.json 을 만들고 upload_token 을 실제 값으로 채우세요. config.json 은 .gitignore 로 차단됩니다.",
+  "upload_token": "여기에-Vercel-UPLOAD_SECRET_TOKEN-과-동일한-값-입력",
+  "api_url": "https://starstock.vercel.app/api/upload-stocks",
+  "excel_file": "STARSTOCK_MASTER.xlsm",
+  "sheet_name": "MASTER",
+  "status_cell": "P1",
+  "timestamp_cell": "P2",
+  "interval_cell": "P3",
+  "data_start_row": 11,
+  "data_end_row": 110,
+  "entry_price": {
+    "breakout_ratio": 1.5,
+    "candle_minutes": 3,
+    "consecutive_candles": 2,
+    "tracker_file": "starstock-tracker.json"
+  }
+}
