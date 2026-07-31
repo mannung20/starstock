@@ -23,6 +23,22 @@ uploader/uploader.log
 # ===== Excel 임시 잠금 파일 =====
 ~$*
 
+# ===== Excel 바이너리 / 백업 / 시뮬레이션 (로컬 전용) =====
+uploader/*.xlsm
+uploader/*.xlsx
+uploader/simulation-xlsm/
+uploader/*.backup_*.xlsm
+prd-tmp/
+
+# ===== 로그 파일 (로컬 전용) =====
+uploader/uploader_diag.log
+uploader/vba_dde.log
+uploader/vba_flicker.log
+uploader/_rehearsal_tracker.json
+
+# ===== 빌드 아티팩트 =====
+web/tsconfig.tsbuildinfo
+
 # ===== 내부 작업노트/로컬 스크립트 (커밋 제외, 루트만) =====
 /*.txt
 /*.bat
