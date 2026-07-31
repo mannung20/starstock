@@ -7,6 +7,13 @@ import { upEnergy, energyBand } from "@/lib/stock-calc";
 import { formatKRW } from "@/lib/utils";
 import type { StockRow, StockStatus } from "@/lib/types";
 
+function fmtDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "-";
+  const parts = dateStr.split("-");
+  if (parts.length !== 3) return dateStr;
+  return `${parts[1]}/${parts[2]}`;
+}
+
 function Row({ stock }: { stock: StockRow }) {
   const router = useRouter();
   const [target, setTarget] = useState(String(stock.target_price));
@@ -51,6 +58,7 @@ function Row({ stock }: { stock: StockRow }) {
       <td className="px-2 py-2">
         <button onClick={toggleVisible} title="표시/숨김 토글">{visible ? "🟢" : "⚫"}</button>
       </td>
+      <td className="px-2 py-2 tabular-nums text-xs text-muted-foreground">{fmtDate(stock.entry_date)}</td>
       <td className="px-2 py-2 font-bold text-muted-foreground">{stock.rank}</td>
       <td className="px-2 py-2 font-semibold">{empty ? "(비어있음)" : stock.stock_name}</td>
       <td className="px-2 py-2 tabular-nums">{formatKRW(stock.current_price)}</td>
@@ -84,21 +92,45 @@ function Row({ stock }: { stock: StockRow }) {
 }
 
 export function StocksManager({ stocks }: { stocks: StockRow[] }) {
-  const cols = ["표시", "순위", "종목명", "현재가", "목표가", "손절가", "상태", "메모", "매수기준가", "상승에너지", ""];
+  const [dateFilter, setDateFilter] = useState<string>("all");
+
+  const uniqueDates = Array.from(
+    new Set(stocks.map((s) => s.entry_date).filter(Boolean))
+  ).sort().reverse() as string[];
+
+  const filtered =
+    dateFilter === "all" ? stocks : stocks.filter((s) => s.entry_date === dateFilter);
+
+  const cols = ["표시", "날짜", "순위", "종목명", "현재가", "목표가", "손절가", "상태", "메모", "매수기준가", "상승에너지", ""];
   return (
     <div className="space-y-2">
+      <div className="flex items-center gap-2 text-sm">
+        <span className="text-muted-foreground">날짜 필터</span>
+        <select
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value)}
+          className="rounded border px-2 py-1 text-sm"
+        >
+          <option value="all">전체 ({stocks.length}종목)</option>
+          {uniqueDates.map((d) => (
+            <option key={d} value={d}>
+              {d} ({stocks.filter((s) => s.entry_date === d).length}종목)
+            </option>
+          ))}
+        </select>
+      </div>
       <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[900px] text-left text-sm">
+        <table className="w-full min-w-[980px] text-left text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>{cols.map((c, i) => <th key={i} className="whitespace-nowrap px-2 py-2 font-medium">{c}</th>)}</tr>
           </thead>
           <tbody>
-            {stocks.map((s) => <Row key={s.stock_code || s.rank} stock={s} />)}
+            {filtered.map((s) => <Row key={s.stock_code || s.rank} stock={s} />)}
           </tbody>
         </table>
       </div>
       <p className="text-xs text-muted-foreground">
-        🟢 표시중 · ⚫ 숨김(클릭 토글) · ✅ 매수기준가 확정 · ⬜ 미확정 · 값 수정 후 [저장]
+        🟢 표시중 · ⚫ 숨김(클릭 토글) · ✅ 매수기준가 확정 · ⬜ 미확정 · 날짜=TOP10 진입일 · 값 수정 후 [저장]
       </p>
     </div>
   );
