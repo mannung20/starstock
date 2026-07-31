@@ -36,7 +36,7 @@ export async function getStocksPayload(): Promise<StocksPayload> {
   const supabase = createClient();
   const { role } = await getViewer();
 
-  const { data } = await supabase.from("stocks").select("*").order("rank", { ascending: true });
+  const { data } = await supabase.from("stocks").select("*").eq("is_visible", true).order("rank", { ascending: true });
   let stocks = (data ?? []) as StockRow[];
 
   if (role === "guest") {
@@ -52,7 +52,8 @@ export async function getStocksPayload(): Promise<StocksPayload> {
   const { count } = await admin
     .from("stocks")
     .select("rank", { count: "exact", head: true })
-    .eq("is_visible", true);
+    .eq("is_visible", true)
+    .lte("rank", 10);
 
   return {
     role,
