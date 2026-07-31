@@ -21,8 +21,9 @@ export type Slot =
  * │ 조건                          │ 슬롯 종류                             │
  * ├──────────────────────────────┼──────────────────────────────────────┤
  * │ DB에 해당 rank 종목 있음      │ real (모든 역할)                      │
+ * │ 없음 + admin/vip             │ 슬롯 미생성 (권한 내 빈 rank는 무시)  │
  * │ 없음 + guest + rank≤freeCount│ login (로그인 유도)                   │
- * │ 없음 + 그 외                  │ vip (VIP 구독 유도)                   │
+ * │ 없음 + 그 외(free/guest 초과)│ vip (VIP 구독 유도)                   │
  * └──────────────────────────────┴──────────────────────────────────────┘
  *
  * n = max(totalVisible, stocks.length)
@@ -42,10 +43,12 @@ export function buildSlots(
     const stock = byRank.get(r);
     if (stock) {
       slots.push({ kind: "real", rank: r, stock });           // 데이터 있음 → 실제 카드
+    } else if (role === "admin" || role === "vip") {
+      continue;                                                // 권한 내 빈 rank → 슬롯 미생성 (vip 잠금 오표시 방지)
     } else if (role === "guest" && r <= freeCount) {
       slots.push({ kind: "login", rank: r });                 // 비회원 무료구간 → 로그인 유도
     } else {
-      slots.push({ kind: "vip", rank: r });                   // 그 외(free 초과, 비회원 초과) → VIP 유도
+      slots.push({ kind: "vip", rank: r });                   // free/guest 초과 → VIP 구독 유도
     }
   }
   return slots;
