@@ -12,9 +12,15 @@ import { formatKRW, formatPercent } from "@/lib/utils";
 import type { StockRow } from "@/lib/types";
 import type { ViewerRole } from "@/lib/stock-slots";
 
-/** 목표가/손절가 한 줄 (guest=🔒, free=금액, vip=금액+%) */
+/**
+ * 역할별 가격 표시 기준
+ * guest → 목표가/손절가/매수기준가 모두 🔒 (서버에서도 null 처리됨)
+ * free  → 금액만 표시, % 없음
+ * vip   → 금액 + 남은상승률/하락위험 %
+ * admin → vip 동일 (isVip=true 처리)
+ */
 function PriceTargets({ stock, role }: { stock: StockRow; role: ViewerRole }) {
-  const isVip = role === "vip";
+  const isVip = role === "vip" || role === "admin"; // admin도 VIP 수준 정보 표시
   const rem = remainingUpPercent(stock.current_price, stock.target_price);
   const risk = downRiskPercent(stock.current_price, stock.stop_price);
 
@@ -52,7 +58,7 @@ function PriceTargets({ stock, role }: { stock: StockRow; role: ViewerRole }) {
 }
 
 export function StockCard({ stock, role }: { stock: StockRow; role: ViewerRole }) {
-  const isVip = role === "vip";
+  const isVip = role === "vip" || role === "admin"; // admin도 VIP 수준 정보 표시
   const energy = isVip ? upEnergy(stock) : null;
 
   return (

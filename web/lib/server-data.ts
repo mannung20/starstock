@@ -1,3 +1,21 @@
+/**
+ * 역할(role) 체계 및 레이어별 필터링 흐름
+ *
+ * ┌───────┬──────────────┬────────────────────────────────────────────┐
+ * │ 역할  │ DB rank 한도 │ 표시 내용                                   │
+ * ├───────┼──────────────┼────────────────────────────────────────────┤
+ * │ guest │ ≤ 1          │ 가격 🔒, login 유도 슬롯                    │
+ * │ free  │ ≤ 3          │ 가격 공개, 목표가/손절가 (% 없음)            │
+ * │ vip   │ ≤ 10         │ 전체 공개 + 시/고/저가, 에너지게이지        │
+ * │ admin │ ≤ 10         │ vip 동일 (관리 권한은 별도 admin_whitelist) │
+ * └───────┴──────────────┴────────────────────────────────────────────┘
+ *
+ * 필터링 레이어 순서:
+ *   1. DB RLS      (supabase/03_rls.sql)      → rank 상한 + is_visible 차단
+ *   2. server-data (이 파일)                  → guest 가격 null 마스킹
+ *   3. stock-slots (lib/stock-slots.ts)       → UI 슬롯 배치 (real/login/vip)
+ *   4. StockCard   (components/stocks/)       → 카드 내 정보 차등 표시
+ */
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -14,6 +32,7 @@ export interface StocksPayload {
 
 /**
  * 현재 요청자의 등급 판별 (세션 없으면 guest).
+ * 판별 순서: auth.getUser → profiles.role 조회 → 없으면 "free" 기본값.
  * React cache()로 감싸 동일 요청 렌더 내 중복 호출을 1회로 dedupe
  * (page.tsx 와 getStocksPayload 가 각각 호출해도 auth.getUser/profiles 왕복 1회).
  */
@@ -31,7 +50,15 @@ export const getViewer = cache(
   },
 );
 
-/** GET /api/stocks 와 홈 SSR 이 공유하는 등급별 종목 페이로드. */
+/**
+ * GET /api/stocks 와 홈 SSR 이 공유하는 등급별 종목 페이로드.
+ *
+ * stocks 조회: createClient(일반, RLS 적용) → is_visible=true AND rank≤visible_rank_limit()
+ *   + 명시적 .eq("is_visible", true) 이중 방어 (rank>10 잔류 데이터 오산정 방지)
+ * count 조회: createAdminClient(service_role, RLS 우회) → is_visible=true AND rank≤10
+ *   → total_visible: VIP/admin 기준 전체 공개 종목 수 (free/guest의 잠금 수 계산용)
+ *   → count(=stocks.length)와 total_visible 차이 = 현재 역할에서 잠긴 종목 수
+ */
 export async function getStocksPayload(): Promise<StocksPayload> {
   const supabase = createClient();
   const { role } = await getViewer();
@@ -39,6 +66,8 @@ export async function getStocksPayload(): Promise<StocksPayload> {
   const { data } = await supabase.from("stocks").select("*").eq("is_visible", true).order("rank", { ascending: true });
   let stocks = (data ?? []) as StockRow[];
 
+  // guest: 서버에서도 가격 null 처리 (RLS로 데이터는 왔지만 F12 개발자도구 우회 차단)
+  // free/vip/admin은 그대로 전달 → 카드 컴포넌트(StockCard)에서 역할별 표시 차등
   if (role === "guest") {
     stocks = stocks.map((s) => ({
       ...s,

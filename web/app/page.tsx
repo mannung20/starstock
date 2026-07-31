@@ -41,9 +41,16 @@ export default async function HomePage() {
   const showSignals = config.home_signals_visible !== "false";
 
   const layout = config.stock_layout === "table" ? "table" : "card";
-  const freeCount = Number(config.free_visible_count ?? "3");
+  const freeCount = Number(config.free_visible_count ?? "3");   // free 역할 공개 종목 수 (관리자 설정)
   const intervalMin = Number(config.upload_interval_default ?? "5");
+
+  // lockedCount: 현재 역할에서 잠긴 종목 수 → VIP 배너 문구 "VIP 전용 N개 잠김"에 사용
+  //   total_visible = is_visible=true AND rank≤10 전체 수 (vip/admin 기준 전체 풀)
+  //   payload.count = 현재 역할 RLS로 실제 받은 수
   const lockedCount = Math.max(0, payload.total_visible - payload.count);
+
+  // isMember: vip와 admin을 동일하게 취급 → VIP 배너 숨김 기준
+  // (admin은 관리 목적으로 로그인하므로 VIP 구독 유도 배너 불필요)
   const isMember = viewer.role === "vip" || viewer.role === "admin";
 
   return (
