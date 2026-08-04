@@ -82,8 +82,12 @@ export default async function HistoryPage() {
               <table className="w-full min-w-[720px] text-left text-sm">
                 <thead className="bg-muted/50 text-xs text-muted-foreground">
                   <tr>
-                    {["종목", "추천일", "마감일", "진입가", "청산가", "수익률", "결과", "비고"].map((c) => (
-                      <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">{c}</th>
+                    {([
+                      { h: "종목" }, { h: "추천일" }, { h: "마감일" },
+                      { h: "진입가", r: true }, { h: "청산가", r: true }, { h: "수익률", r: true },
+                      { h: "결과" }, { h: "비고" },
+                    ] as { h: string; r?: boolean }[]).map(({ h, r }, i) => (
+                      <th key={i} className={`whitespace-nowrap px-3 py-2 font-medium${r ? " text-right" : ""}`}>{h}</th>
                     ))}
                   </tr>
                 </thead>
@@ -98,9 +102,9 @@ export default async function HistoryPage() {
                         </td>
                         <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.recommend_date ?? "-"}</td>
                         <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.close_date ?? "-"}</td>
-                        <td className="px-3 py-2 tabular-nums">{formatKRW(r.entry_price)}</td>
-                        <td className="px-3 py-2 tabular-nums">{formatKRW(r.exit_price)}</td>
-                        <td className={`px-3 py-2 font-semibold tabular-nums ${returnTone(r.return_rate)}`}>
+                        <td className="px-3 py-2 tabular-nums text-right">{formatKRW(r.entry_price)}</td>
+                        <td className="px-3 py-2 tabular-nums text-right">{formatKRW(r.exit_price)}</td>
+                        <td className={`px-3 py-2 font-semibold tabular-nums text-right ${returnTone(r.return_rate)}`}>
                           {r.signal_id != null && r.return_rate != null && <span className="mr-1 text-xs font-normal text-muted-foreground">최고</span>}
                           {r.return_rate != null ? formatPercent(r.return_rate) : "-"}
                         </td>

@@ -168,8 +168,12 @@ function ManualView({
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
-              {["종목", "추천일", "마감일", "진입가", "청산가", "수익률", "결과", ""].map((c) => (
-                <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">{c}</th>
+              {([
+                { h: "종목" }, { h: "추천일" }, { h: "마감일" },
+                { h: "진입가", r: true }, { h: "청산가", r: true }, { h: "수익률", r: true },
+                { h: "결과" }, { h: "" },
+              ] as { h: string; r?: boolean }[]).map(({ h, r }, i) => (
+                <th key={i} className={`whitespace-nowrap px-3 py-2 font-medium${r ? " text-right" : ""}`}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -181,9 +185,9 @@ function ManualView({
                   <td className="px-3 py-2"><span className="font-semibold">{r.stock_name ?? "-"}</span> <span className="text-xs text-muted-foreground">{r.stock_code}</span></td>
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.recommend_date ?? "-"}</td>
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.close_date ?? "-"}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatKRW(r.entry_price)}</td>
-                  <td className="px-3 py-2 tabular-nums">{formatKRW(r.exit_price)}</td>
-                  <td className={`px-3 py-2 font-semibold tabular-nums ${r.return_rate != null && r.return_rate > 0 ? "text-up" : r.return_rate != null && r.return_rate < 0 ? "text-down" : ""}`}>
+                  <td className="px-3 py-2 tabular-nums text-right">{formatKRW(r.entry_price)}</td>
+                  <td className="px-3 py-2 tabular-nums text-right">{formatKRW(r.exit_price)}</td>
+                  <td className={`px-3 py-2 font-semibold tabular-nums text-right ${r.return_rate != null && r.return_rate > 0 ? "text-up" : r.return_rate != null && r.return_rate < 0 ? "text-down" : ""}`}>
                     {r.signal_id != null && r.return_rate != null && <span className="mr-1 text-xs font-normal text-muted-foreground">최고</span>}
                     {r.return_rate != null ? formatPercent(r.return_rate) : "-"}
                   </td>
@@ -382,8 +386,12 @@ function AutoView({ bridge }: { bridge: BridgeConfig }) {
         <table className="w-full min-w-[820px] text-left text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
-              {["종목", "신호시각(KST)", "매수기준가", "최고달성률 (전일고가 대비)", "등급", "순위", "표식", "관리"].map((c) => (
-                <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">{c}</th>
+              {([
+                { h: "종목" }, { h: "신호시각(KST)" },
+                { h: "매수기준가", r: true }, { h: "최고달성률 (전일고가 대비)", r: true },
+                { h: "등급" }, { h: "순위", r: true }, { h: "표식" }, { h: "관리" },
+              ] as { h: string; r?: boolean }[]).map(({ h, r }, i) => (
+                <th key={i} className={`whitespace-nowrap px-3 py-2 font-medium${r ? " text-right" : ""}`}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -394,8 +402,8 @@ function AutoView({ bridge }: { bridge: BridgeConfig }) {
               <tr key={r.id} className="border-t">
                 <td className="px-3 py-2"><span className="font-semibold">{r.stock_name || "-"}</span> <span className="text-xs text-muted-foreground">{r.stock_code}</span></td>
                 <td className="px-3 py-2 tabular-nums text-muted-foreground">{fmtKST(r.signaled_at)}</td>
-                <td className="px-3 py-2 tabular-nums">{formatKRW(r.entry_price)}</td>
-                <td className={`px-3 py-2 font-semibold tabular-nums ${gradeCls(r.max_pct)}`}>
+                <td className="px-3 py-2 tabular-nums text-right">{formatKRW(r.entry_price)}</td>
+                <td className={`px-3 py-2 font-semibold tabular-nums text-right ${gradeCls(r.max_pct)}`}>
                   {editing ? (
                     <span className="flex items-center gap-1">
                       <input
@@ -408,7 +416,7 @@ function AutoView({ bridge }: { bridge: BridgeConfig }) {
                   ) : formatAchieved(r.max_pct)}
                 </td>
                 <td className="px-3 py-2 whitespace-nowrap"><span className={`rounded bg-muted px-1.5 py-0.5 text-xs ${gradeCls(r.max_pct)}`}>{bucketLabel(r.max_pct)}</span></td>
-                <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.rank ?? "-"}</td>
+                <td className="px-3 py-2 tabular-nums text-right text-muted-foreground">{r.rank ?? "-"}</td>
                 <td className="px-3 py-2">
                   {r.is_short && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">단축창</span>}
                 </td>

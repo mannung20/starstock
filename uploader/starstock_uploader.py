@@ -48,10 +48,14 @@ StarStock 자동 업로더 — 3분봉 밴드 4구역 매수신호 자동판정 
 import json
 import time
 import datetime
+import logging
 import os
 import sys
 import signal
 import argparse
+import band_logic
+
+logger = logging.getLogger("starstock")
 
 try:
     import requests
@@ -65,9 +69,45 @@ except ImportError:
     print("[오류] pywin32 미설치: pip install pywin32")
     sys.exit(1)
 
+# ══════════════════════════════════════════════════════════════
+# 파일 구조 목차
+# ──────────────────────────────────────────────────────────────
+#  [상수]           STATUS_MAP / REVERSE_STATUS / CUTOFF_LABEL / _STATUS_KR
+#  [헬퍼함수]       load_config / _disp_w / _pad / _safe_int
+#  [진단헬퍼]       _admin_level / _admin_text / _diag_log / _diag_scan / _com_retry
+#  [Excel COM]      _find_open_workbook(116줄) — COM 연결 탐색 3단계 로직
+#  [클래스] BreakoutTracker  — 활성화 카운트·플래그 JSON 영속 관리
+#  [클래스] ExcelConnection  — COM 연결·셀 읽기/쓰기 래퍼
+#  [클래스] StarStockUploader — 메인 오케스트레이터
+#    ├ __init__              : 설정 로드 + 파라미터 초기화
+#    ├ _update_status_history: 종목 상태 변경 시각 추적 (CMD 출력용)
+#    ├ _print_upload_result  : 박스 테이블 CMD 출력
+#    ├ sync_params_from_excel: 매 주기 J3~K6 감도 → config.json 동기화
+#    ├ [Step 1] _scan_activation    : 전체 스캔 + 활성화 판정 + M열 기입
+#    ├ [Step 2] _calc_zone_status   : 4구역 status 판정 + J열 기입
+#    ├ [Step 3] _build_hide_markers : 빈 슬롯 숨김 마커 + J열 잔상 초기화
+#    ├ detect_and_update    : Step 1→2→3 오케스트레이터 (핵심 진입점)
+#    ├ upload               : Vercel API 배치 전송 (재시도 3회)
+#    ├ run_once             : 1회 감지+업로드
+#    ├ run_auto             : 장중 자동 반복 루프 (09:00~15:30)
+#    └ copy_high_to_prev_high: 15:30 장마감 F열→L열 복사
+#  [진입점]         main()
+# ══════════════════════════════════════════════════════════════
+
 STATUS_MAP   = {"매수적기": "buy", "관망유지": "hold", "손절조심": "sell"}   # (구)J열 읽기용·현재 미사용
 REVERSE_STATUS = {"buy": "매수적기", "hold": "관망유지", "sell": "손절조심"}    # 밴드 자동판정 → J열 기입용
 CUTOFF_LABEL = "관심끊음"   # 하한밴드 미만(너무 하락) → 웹숨김 + J열 표기
+
+# CMD 박스 출력용 상태 한글 라벨 (cutoff 포함)
+_STATUS_KR = {"buy": "매수적기", "hold": "관망유지", "sell": "손절조심", "cutoff": "관심끊음"}
+
+def _disp_w(s: str) -> int:
+    """한글/CJK = 2칸, ASCII = 1칸 기준 화면 표시 폭"""
+    return sum(2 if ord(c) > 0x00FF else 1 for c in str(s))
+
+def _pad(s: str, width: int) -> str:
+    """표시 폭 기준 우측 공백 패딩"""
+    return str(s) + " " * max(0, width - _disp_w(str(s)))
 
 
 # ─────────────────────────────────────────────────────
@@ -115,13 +155,13 @@ class BreakoutTracker:
     def reset_all(self):
         self.data = {"stocks": {}, "session_date": str(datetime.date.today())}
         self.save()
-        print("[tracker] 전체 초기화 완료")
+        logger.info("[tracker] 전체 초기화 완료")
 
     def check_new_day(self):
         """날짜가 바뀌면 카운트 초기화 (장 시작 리셋)"""
         today = str(datetime.date.today())
         if self.data.get("session_date") != today:
-            print(f"[tracker] 새 거래일({today}) — 카운트 초기화")
+            logger.info("[tracker] 새 거래일(%s) — 카운트 초기화", today)
             self.reset_all()
 
     def get_count(self, code):
@@ -488,8 +528,9 @@ class ExcelConnection:
     def set_cell(self, row, col, value):
         try:
             self.ws.Cells(row, col).Value = value
-        except Exception:
-            pass
+        except Exception as e:
+            _diag_log(f"[set_cell] 실패 row={row} col={col} value={value!r}: {e}")
+            logger.warning("⚠️  엑셀 셀 쓰기 실패 (행%d 열%d ← '%s') — 엑셀이 DDE 계산 중이라 잠깐 거부함, 다음 주기에 자동 재시도됩니다", row, col, value)
 
     def set_status(self, text):
         try:
@@ -511,6 +552,20 @@ class ExcelConnection:
 # 업로더 메인
 # ─────────────────────────────────────────────────────
 class StarStockUploader:
+    # 엑셀 열 인덱스 상수 (양식 변경 시 이곳만 수정)
+    COL_CODE        = 2   # B: 종목코드
+    COL_NAME        = 3   # C: 종목명
+    COL_CURRENT     = 4   # D: 현재가 (DDE 실시간)
+    COL_OPEN        = 5   # E: 시가
+    COL_HIGH        = 6   # F: 고가 (당일)
+    COL_LOW         = 7   # G: 저가
+    COL_TARGET      = 8   # H: 목표가
+    COL_STOP        = 9   # I: 손절가
+    COL_STATUS_LBL  = 10  # J: 추천상태 표시 (자동기입)
+    COL_MEMO        = 11  # K: 메모
+    COL_PREV_HIGH   = 12  # L: 전일고가 (매수기준가 원본)
+    COL_ENTRY       = 13  # M: 매수기준가 (Python 계산값 기입)
+    COL_CHANGE_RATE = 14  # N: 등락률 (%)
 
     def __init__(self, config_path="config.json"):
         self.config_path = config_path
@@ -528,6 +583,71 @@ class StarStockUploader:
         tracker_file = self.ep_cfg.get("tracker_file", "starstock-tracker.json")
         self.tracker = BreakoutTracker(tracker_file)
         self.running = False
+        self.status_history: dict = {}  # {stock_code: (status, "HH:MM:SS")} — 상태 변경 시각 추적
+
+    # ── 상태 변경 시각 추적 ─────────────────────────────────
+    def _update_status_history(self, stocks: list) -> dict:
+        """종목별 status 변화 감지 → 변경 시각(KST) 기록.
+        반환: {stock_code: "신규"/"변경"/"유지"} — 이번 주기 분류"""
+        now_kst = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%H:%M:%S")
+        notes = {}
+        for s in stocks:
+            code   = s.get("stock_code", "")
+            status = s.get("status", "")
+            if not code:
+                continue
+            prev = self.status_history.get(code)
+            if prev is None:
+                self.status_history[code] = (status, now_kst)
+                notes[code] = "신규"
+            elif prev[0] != status:
+                self.status_history[code] = (status, now_kst)
+                notes[code] = "변경"
+            else:
+                notes[code] = "유지"
+        return notes
+
+    # ── CMD 박스 테이블 출력 ──────────────────────────────
+    def _print_upload_result(self, visible: list, hidden: list, notes: dict,
+                              mins=None, kst_now: str = ""):
+        """업로드 성공 시 박스 테이블 스타일로 종목 목록 출력"""
+        # 컬럼 표시 폭 (display columns): 순위, 종목명, 현재가, 상태, 변경시각, 구분
+        cw = [4, 14, 10, 8, 10, 6]
+
+        def row(*cells):
+            parts = [f" {_pad(c, w)} " for c, w in zip(cells, cw)]
+            return "║" + "║".join(parts) + "║"
+
+        def sep(l_ch, m_ch, r_ch):
+            return l_ch + m_ch.join("═" * (w + 2) for w in cw) + r_ch
+
+        if not kst_now:
+            kst_now = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%H:%M:%S")
+
+        print(f"\n[{kst_now}] ─── 업로드 완료 ───")
+        print(sep("╔", "╦", "╗"))
+        print(row("순위", "종목명", "현재가", "상태", "변경시각", "구분"))
+        print(sep("╠", "╬", "╣"))
+
+        for s in visible:
+            code     = s["stock_code"]
+            rank_s   = f"{s['rank']:02d}"
+            name_s   = s["stock_name"]
+            price_s  = f"{s['current_price']:,}원"
+            status_s = _STATUS_KR.get(s.get("status", ""), s.get("status", "-"))
+            hist     = self.status_history.get(code)
+            note_s   = notes.get(code, "유지")
+            changed_s = (hist[1] if hist else kst_now) + ("★" if note_s != "유지" else "")
+            print(row(rank_s, name_s, price_s, status_s, changed_s, note_s))
+
+        print(sep("╚", "╩", "╝"))
+
+        # 요약 Footer
+        next_s = ""
+        if mins:
+            next_dt = datetime.datetime.utcnow() + datetime.timedelta(hours=9, minutes=mins)
+            next_s = f"  |  다음 실행 {next_dt.strftime('%H:%M:%S')}"
+        print(f"  표시 {len(visible)}  숨김 {len(hidden)}{next_s}")
 
     # ── 엑셀 J3~K6(변수명/값) → config.json 동기화 + 파라미터 갱신 ──
     #    (시뮬 replay_3min.py 도 config.json 을 읽으므로 실제·시뮬 판정 공통)
@@ -556,9 +676,9 @@ class StarStockUploader:
             try:
                 with open(self.config_path, "w", encoding="utf-8") as f:
                     json.dump(self.cfg, f, ensure_ascii=False, indent=2)
-                print(f"[동기화] 엑셀 J3~K7 → config.json 반영: {m}")
+                logger.info("[동기화] 엑셀 J3~K7 → config.json 반영: %s", m)
             except Exception as e:
-                print(f"[동기화] config.json 쓰기 실패: {e}")
+                logger.error("[동기화] config.json 쓰기 실패: %s", e)
         # 파라미터 재적용(실제·시뮬 공통 기준). 상/하한밴드%·최소등락률%는 json 값 그대로.
         self.ratio       = ep.get("breakout_ratio", 1.5) / 100
         self.upper_ratio = ep.get("band_upper_ratio", 2.0) / 100
@@ -573,165 +693,240 @@ class StarStockUploader:
         except Exception:
             pass
 
-    # ── 핵심: 돌파 감지 + M열 기입 ───────────────────
-    def detect_and_update(self):
+    # ── [Step 1] 전체 스캔 + 활성화 판정 ─────────────
+    def _scan_activation(self, start: int, end: int) -> list:
         """
-        전체 종목 스캔(밴드 4구역 + 활성화):
-          - 매수기준가(=전일고가) → M열 기입
-          - 활성화: 현재가 ≥ 매수활성화선(기준가×1.015) 가 N캔들 연속 → 최초 1회 돌파확정(당일 sticky)
-          - 활성화 종목만 4구역 status 자동판정 → 엑셀 J열 기입 + 전송대상 편입
-              상한초과:관망유지 / 매도활성화선~상한:매수적기 / 하한~매도활성화선:손절조심 / 하한미만:관심끊음(웹숨김)
-        반환: 전송 대상(활성화 종목) + 빈슬롯 숨김마커
+        엑셀 전체 종목 스캔:
+          · COL_ENTRY(M열) 매수기준가 기입
+          · 매수활성화선(기준가×(1+buy돌파%)) N캔들 연속 돌파 시 활성화 확정
+          · 등락률(COL_CHANGE_RATE) < min_change_rate 이면 후보 제외
+        반환: 활성화된 종목의 데이터 dict 리스트 (Step 2 입력용)
         """
-        self.sync_params_from_excel()   # 매 주기 엑셀 J3~K6 감도 → config.json 동기화
-        start = self.cfg["data_start_row"]
-        end   = self.cfg["data_end_row"]
-        confirmed_stocks = []
-        cutoff_ranks = set()   # 관심끊음(웹숨김) 확정된 rank 모음
-
+        C = self.__class__   # 컬럼 상수 단축 참조
+        activated = []
         for row in range(start, end + 1):
-            code = str(self.xl.cell_val(row, 2) or "").strip()
+            code = str(self.xl.cell_val(row, C.COL_CODE) or "").strip()
             if len(code) != 6 or not code.isdigit():
                 continue
 
-            name = str(self.xl.cell_val(row, 3) or "").strip()   # C: 종목명
-            tag  = f"[{code} {name}]" if name else f"[{code}]"    # 로그 표시용(코드+종목명)
-            current   = _safe_int(self.xl.cell_val(row, 4))   # D: 현재가(=캔들 종가 대용)
-            prev_high = _safe_int(self.xl.cell_val(row, 12))  # L: 전일고가
+            name      = str(self.xl.cell_val(row, C.COL_NAME) or "").strip()
+            tag       = f"[{code} {name}]" if name else f"[{code}]"
+            current   = _safe_int(self.xl.cell_val(row, C.COL_CURRENT))
+            prev_high = _safe_int(self.xl.cell_val(row, C.COL_PREV_HIGH))
 
             if current <= 0:
                 self.tracker.reset_stock(code)
                 continue
 
-            # 매수기준가(entry_price) = 전일고가  ← 실제 기준값(M열·웹 표시). 4개 경계선 산출.
+            # 4개 경계선 산출 (기준: 전일고가)
             entry_price   = int(prev_high) if prev_high > 0 else int(current)
-            activate_line = int(entry_price * (1 + self.ratio))       # 활성화 선 = 전일고가×(1+buy돌파%)
-            upper_band    = int(entry_price * (1 + self.upper_ratio)) # 관망유지 경계(+상한밴드%)
-            sell_line     = int(entry_price * (1 - self.sell_ratio))  # 손절조심 선(−sell돌파%)
-            lower_band    = int(entry_price * (1 - self.lower_ratio)) # 관심끊음 경계(−하한밴드%)
-            self.xl.set_cell(row, 13, entry_price)                    # M열: 매수기준가(=전일고가)
+            activate_line = int(entry_price * (1 + self.ratio))
+            upper_band    = int(entry_price * (1 + self.upper_ratio))
+            sell_line     = int(entry_price * (1 - self.sell_ratio))
+            lower_band    = int(entry_price * (1 - self.lower_ratio))
+            self.xl.set_cell(row, C.COL_ENTRY, entry_price)   # M열: 매수기준가
 
-            # ── 활성화 前(후보): 등락률 스크리닝 + 매수활성화선 연속 카운트로 활성화 판정 ──
             if not self.tracker.is_activated(code):
-                # 1차 필터: 등락률(N열) < 최소등락률(json)이면 후보 제외
+                # 1차 필터: 등락률 미달 → 후보 제외
                 if self.min_chg > 0:
                     try:
-                        chg = float(self.xl.cell_val(row, 14))   # N: 등락률(%)
+                        chg = float(self.xl.cell_val(row, C.COL_CHANGE_RATE))
                         if chg < self.min_chg:
                             self.tracker.reset_stock(code)
                             continue
                     except (TypeError, ValueError):
                         pass
-                # 연속 카운트: 현재가 ≥ 매수활성화선(전일고가×(1+buy돌파%))
+                # 연속 카운트: 매수활성화선 돌파 여부
                 if current >= activate_line:
                     self.tracker.increment(code, entry_price)
                     cnt = self.tracker.get_count(code)
                     if cnt >= self.req_cnt:
                         self.tracker.mark_activated(code)
-                        print(f"  {tag} ★활성화(돌파확정) {cnt}/{self.req_cnt}캔들 "
-                              f"(현재가={current:,} / 매수활성화선={activate_line:,})")
+                        logger.info("%s ★활성화(돌파확정) %d/%d캔들 (현재가=%s / 매수활성화선=%s)",
+                                    tag, cnt, self.req_cnt, f"{current:,}", f"{activate_line:,}")
                     else:
-                        print(f"  {tag} 돌파 감지 {cnt}/{self.req_cnt}캔들 "
-                              f"(현재가={current:,} / 매수활성화선={activate_line:,})")
+                        logger.info("%s 돌파 감지 %d/%d캔들 (현재가=%s / 매수활성화선=%s)",
+                                    tag, cnt, self.req_cnt, f"{current:,}", f"{activate_line:,}")
                 else:
                     if self.tracker.get_count(code) > 0:
-                        print(f"  {tag} 조건 미달 → 카운트 리셋 (현재가={current:,} / 매수활성화선={activate_line:,})")
+                        logger.info("%s 조건 미달 → 카운트 리셋 (현재가=%s / 매수활성화선=%s)",
+                                    tag, f"{current:,}", f"{activate_line:,}")
                     self.tracker.reset_stock(code)
 
-            # 아직 미활성(후보) → 웹 미표시(전송 제외)
             if not self.tracker.is_activated(code):
+                continue   # 미활성 → 전송 제외
+
+            # 동일 종목코드 중복 행 방어 (엑셀에 같은 코드가 여러 행에 입력된 경우)
+            if any(a["code"] == code for a in activated):
+                logger.warning("⚠️  [%s %s] 엑셀에 같은 종목코드가 중복 입력됨 → 이번 전송 건너뜀 (엑셀 %d행 확인 필요)", code, name, row)
                 continue
 
-            # ── 활성화됨 → 4구역 status 자동판정 ──
-            #   관망유지 > 상한밴드 / 매수적기 [sell선~상한밴드] / 손절조심 [하한밴드~sell선]
-            #   / 관심끊음 < 하한밴드. 손절조심·관심끊음은 sell선 아래로 sell연속캔들 확정돼야 적용(깜빡임 방지).
+            # 활성화 확정 → Step 2(4구역 판정)에 넘길 데이터 수집
+            activated.append({
+                "row":          row,
+                "rank":         row - start + 1,
+                "code":         code,
+                "name":         name,
+                "tag":          tag,
+                "current":      current,
+                "entry_price":  entry_price,
+                "upper_band":   upper_band,
+                "sell_line":    sell_line,
+                "lower_band":   lower_band,
+                "open_price":   _safe_int(self.xl.cell_val(row, C.COL_OPEN)),
+                "high_price":   _safe_int(self.xl.cell_val(row, C.COL_HIGH)),
+                "low_price":    _safe_int(self.xl.cell_val(row, C.COL_LOW)),
+                "target_price": _safe_int(self.xl.cell_val(row, C.COL_TARGET)),
+                "stop_price":   _safe_int(self.xl.cell_val(row, C.COL_STOP)),
+                "memo":         str(self.xl.cell_val(row, C.COL_MEMO) or ""),
+            })
+        return activated
+
+    # ── [Step 2] 4구역 status 판정 (순수 계산, Excel IO 없음) ──
+    def _calc_zone_status(self, activated: list) -> tuple:
+        """
+        활성화된 종목만 4구역 status 판정. Excel 쓰기는 하지 않음.
+          hold(관망유지) / buy(매수적기) / sell(손절조심) / cutoff(관심끊음→웹숨김)
+        손절조심·관심끊음은 sell연속캔들 확정돼야 적용 (깜빡임 방지).
+        반환: (confirmed_stocks, cutoff_ranks, j_writes)
+          j_writes: {row: label} — _flush_j_column 에서 일괄 기입
+        """
+        confirmed_stocks = []
+        cutoff_ranks = set()
+        j_writes: dict = {}   # {엑셀행: J열에 기입할 문자열}
+
+        for item in activated:
+            row        = item["row"]
+            code       = item["code"]
+            rank       = item["rank"]
+            tag        = item["tag"]
+            current    = item["current"]
+            upper_band = item["upper_band"]
+            sell_line  = item["sell_line"]
+            lower_band = item["lower_band"]
+
+            # rank 1~10 만 전송 (API 슬롯 한도)
+            if not (1 <= rank <= 10):
+                logger.warning("%s rank %d > 10 슬롯초과 → 전송 제외", tag, rank)
+                continue
+
+            # 손절조심·관심끊음 카운트 (매도활성화선 기준 연속 캔들)
             if current < sell_line:
                 self.tracker.increment_down(code)
             else:
                 self.tracker.reset_down(code)
-            down_confirmed = self.tracker.get_down_count(code) >= self.sell_cnt
+            down = self.tracker.get_down_count(code)
 
-            if current > upper_band:
-                status = "hold"          # 관망유지: 상한밴드 초과(이미 상승)
-            elif current >= sell_line:
-                status = "buy"           # 매수적기: sell선~상한밴드
-            elif not down_confirmed:
-                status = "buy"           # sell선 아래지만 미확정 → 매수적기 유지(깜빡임 방지)
-            elif current < lower_band:
-                status = "cutoff"        # 관심끊음: 하한밴드 미만(너무 하락) → 웹숨김
-            else:
-                status = "sell"          # 손절조심: 하한밴드~sell선 (확정)
+            # 4구역 판정 (band_logic 공통 모듈)
+            status = band_logic.determine_status(
+                current, upper_band, sell_line, lower_band, down, self.sell_cnt
+            )
 
-            rank = row - start + 1
-            # API 는 rank 1~10 만 허용(추천 10슬롯). 초과 종목은 전송·J열기입 제외 → 배치 400 방지
-            if not (1 <= rank <= 10):
-                print(f"  {tag} rank {rank} > 10 슬롯초과 → 전송 제외")
-                continue
-
-            # ── 관심끊음: 웹 숨김(전송 제외) + J열 '관심끊음' 표기 ──
             if status == "cutoff":
-                self.xl.set_cell(row, 10, CUTOFF_LABEL)
+                j_writes[row] = CUTOFF_LABEL
                 cutoff_ranks.add(rank)
-                print(f"  {tag} {CUTOFF_LABEL} → 웹숨김 (현재가={current:,} < 하한밴드 {lower_band:,})")
+                logger.info("%s %s → 웹숨김 (현재가=%s < 하한밴드 %s)",
+                            tag, CUTOFF_LABEL, f"{current:,}", f"{lower_band:,}")
                 continue
 
-            # 엑셀 J열(추천상태) 자동 기입 → 웹 표시(top-10)와 동일하게. ※rank 1~10 만
-            self.xl.set_cell(row, 10, REVERSE_STATUS[status])
-            print(f"  {tag} {REVERSE_STATUS[status]} (현재가={current:,} / 매수적기 {sell_line:,}~{upper_band:,})")
+            j_writes[row] = REVERSE_STATUS[status]
+            logger.info("%s %s (현재가=%s / 매수적기 %s~%s)",
+                        tag, REVERSE_STATUS[status], f"{current:,}",
+                        f"{sell_line:,}", f"{upper_band:,}")
             confirmed_stocks.append({
-                "rank":          rank,
-                "stock_code":    code,
-                "stock_name":    name,
-                "current_price": current,
-                "open_price":    _safe_int(self.xl.cell_val(row, 5)),
-                "high_price":    _safe_int(self.xl.cell_val(row, 6)),
-                "low_price":     _safe_int(self.xl.cell_val(row, 7)),
-                "target_price":  _safe_int(self.xl.cell_val(row, 8)),
-                "stop_price":    _safe_int(self.xl.cell_val(row, 9)),
-                "entry_price":   entry_price,
+                "rank":            rank,
+                "stock_code":      code,
+                "stock_name":      item["name"],
+                "current_price":   current,
+                "open_price":      item["open_price"],
+                "high_price":      item["high_price"],
+                "low_price":       item["low_price"],
+                "target_price":    item["target_price"],
+                "stop_price":      item["stop_price"],
+                "entry_price":     item["entry_price"],
                 "entry_confirmed": True,
-                "status":        status,
-                "memo":          str(self.xl.cell_val(row, 11) or ""),
+                "status":          status,
+                "memo":            item["memo"],
             })
 
-        self.tracker.save()
+        return confirmed_stocks, cutoff_ranks, j_writes
 
-        # ── 빈 슬롯 숨김 마커 추가 (웹 유령 종목 제거) ──────────────
-        # rank 1~10 중 확정 종목이 아니면서 코드가 비어있는(또는 무효) 슬롯
-        #  → stock_code="" 숨김 마커 전송 → API 가 is_visible=false 로 웹에서 제거
-        # 유효 6자리 코드지만 미확정인 슬롯은 건드리지 않음(돌파 로직이 관리, 깜빡임 방지)
+    # ── [Step 3] 빈 슬롯 숨김 마커 생성 ──────────────
+    def _build_hide_markers(self, start: int, confirmed_stocks: list,
+                             cutoff_ranks: set, j_writes: dict) -> tuple:
+        """
+        rank 1~10 중 확정 종목이 없는 슬롯 → stock_code="" 숨김 마커 생성.
+          · cutoff 확정 → 숨김 마커 (J열 '관심끊음' 유지)
+          · 유효 코드지만 미확정(돌파 로직 관리) → 건드리지 않음 (깜빡임 방지)
+          · 무효/빈 코드 슬롯 → 숨김 마커 + J열 잔상 초기화(j_writes에 "" 추가)
+        반환: (hide_markers, j_writes) — j_writes는 _flush_j_column 에서 처리
+        """
+        C = self.__class__
         confirmed_ranks = {s["rank"] for s in confirmed_stocks}
         hide_markers = []
         cleared_j = 0
+
         for rank in range(1, 11):
             if rank in confirmed_ranks:
                 continue
             row = start + rank - 1
-            # 관심끊음 확정 행 → J열 '관심끊음' 유지 + 웹숨김 대상(빈칸 초기화 제외)
             if rank in cutoff_ranks:
                 hide_markers.append({"rank": rank, "stock_code": ""})
                 continue
-            # [2026-07-24] 비활성(전송대상 아님) 행의 J열 추천상태 잔상 → 빈칸 초기화.
-            #   J열은 표시 전용(웹은 파이썬 계산값을 별도 전송)이라 웹엔 영향 없음. 엑셀 화면 잔상만 정리.
-            if str(self.xl.cell_val(row, 10) or "").strip():
-                self.xl.set_cell(row, 10, "")
+            # 비활성 행 J열 잔상 초기화 예약
+            if str(self.xl.cell_val(row, C.COL_STATUS_LBL) or "").strip():
+                j_writes[row] = ""
                 cleared_j += 1
-            code = str(self.xl.cell_val(row, 2) or "").strip()
+            code = str(self.xl.cell_val(row, C.COL_CODE) or "").strip()
             if len(code) != 6 or not code.isdigit():
                 hide_markers.append({"rank": rank, "stock_code": ""})
 
         if cleared_j:
-            print(f"  [J초기화] 비활성 {cleared_j}개 행 추천상태 빈칸 처리")
+            logger.debug("[J초기화] 비활성 %d개 행 추천상태 빈칸 처리", cleared_j)
         if hide_markers:
             ranks_txt = ", ".join(str(m["rank"]) for m in hide_markers)
-            print(f"  [숨김] 빈 슬롯 {len(hide_markers)}개 → 웹에서 제거 (rank: {ranks_txt})")
+            logger.info("[숨김] 빈 슬롯 %d개 → 웹에서 제거 (rank: %s)", len(hide_markers), ranks_txt)
 
-        return confirmed_stocks + hide_markers
+        return hide_markers, j_writes
+
+    # ── [Step 4] J열 일괄 기입 ────────────────────────
+    def _flush_j_column(self, j_writes: dict) -> None:
+        """
+        Step 2·3 에서 수집한 J열 쓰기 요청을 한 번에 처리.
+        Excel COM 호출을 계산 완료 후 일괄 수행 → 오류 발생 지점 명확화.
+        """
+        C = self.__class__
+        for row, label in j_writes.items():
+            self.xl.set_cell(row, C.COL_STATUS_LBL, label)
+
+    # ── 핵심 오케스트레이터: Step 1→2→3→4 순서 호출 ────
+    def detect_and_update(self) -> list:
+        """
+        돌파 감지 + 웹 전송 페이로드 조립.
+          Step 1 _scan_activation   : M열 기입 + 활성화 판정
+          Step 2 _calc_zone_status  : 4구역 판정 (순수 계산, IO 없음)
+          Step 3 _build_hide_markers: 빈 슬롯 숨김 마커 + J열 초기화 예약
+          Step 4 _flush_j_column    : J열 일괄 기입 (Excel IO 집중)
+        반환: confirmed_stocks + hide_markers (upload() 입력)
+        """
+        self.sync_params_from_excel()
+        start = self.cfg["data_start_row"]
+        end   = self.cfg["data_end_row"]
+
+        activated                         = self._scan_activation(start, end)
+        confirmed, cutoff_ranks, j_writes = self._calc_zone_status(activated)
+        self.tracker.save()
+        hide_markers, j_writes            = self._build_hide_markers(start, confirmed, cutoff_ranks, j_writes)
+        self._flush_j_column(j_writes)
+
+        return confirmed + hide_markers
 
     # ── API 전송 ─────────────────────────────────────
-    def upload(self, stocks):
+    def upload(self, stocks, notes: dict = None, mins=None):
         if not stocks:
             return False
+        if notes is None:
+            notes = {}
 
         utc_now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         payload = {"timestamp": utc_now, "stocks": stocks}
@@ -755,15 +950,10 @@ class StarStockUploader:
                     server   = resp.headers.get("Server", "?")
                     vercel   = resp.headers.get("X-Vercel-Id", "")
                     self.xl.set_status(f"[도메인리다이렉트{resp.status_code}]")
-                    print(f"[오류] 도메인 리다이렉트 감지 ({resp.status_code}) — 서버/코드 문제 아님")
-                    print(f"       ├ 요청 주소 : {self.cfg['api_url']}")
-                    print(f"       ├ 돌려보냄  : {location}")
-                    print(f"       ├ 응답 서버 : {server}"
-                          + (f"  (X-Vercel-Id: {vercel})" if vercel else ""))
-                    print(f"       ├ 원 인     : Vercel/Hostinger 도메인 설정에 리다이렉트가 걸려 있음")
-                    print(f"       │            (엣지에서 통째로 다른 도메인으로 넘김 → 업로드 도달 못함)")
-                    print(f"       └ 해 결     : Vercel > 프로젝트 > Settings > Domains 에서")
-                    print(f"                     '{location}' 로 보내는 리다이렉트/잘못 붙은 도메인 제거")
+                    logger.error("[도메인리다이렉트%d] 요청=%s → %s (서버:%s)",
+                                 resp.status_code, self.cfg['api_url'], location, server)
+                    print(f"       ├ 원 인  : Vercel/Hostinger 도메인 설정에 리다이렉트가 걸려 있음")
+                    print(f"       └ 해 결  : Vercel > Settings > Domains 에서 '{location}' 리다이렉트 제거")
                     return False   # 재시도해도 동일 → 즉시 중단
                 if resp.status_code == 200:
                     # 표시 종목(코드 있음) / 숨김 마커(코드 빈문자열) 분리
@@ -771,32 +961,35 @@ class StarStockUploader:
                     hidden  = [s for s in stocks if not s.get("stock_code")]
                     msg = f"[업로드완료] 표시 {len(visible)} / 숨김 {len(hidden)}"
                     self.xl.set_status(msg)
-                    print(f"[성공] 표시 {len(visible)}종목, 숨김 {len(hidden)}슬롯 전송 ({utc_now})")
-                    for s in visible:
-                        print(f"       → [{s['stock_code']}] {s['stock_name']} "
-                              f"현재가={s['current_price']:,} 기준={s['entry_price']:,}")
+                    kst_now = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%H:%M:%S")
+                    self._print_upload_result(visible, hidden, notes, mins=mins, kst_now=kst_now)
                     return True
                 elif resp.status_code == 401:
                     self.xl.set_status("[토큰오류]")
-                    print("[오류] 인증 실패(401) — upload_token 확인")
+                    logger.error("인증 실패(401) — upload_token 확인")
                     return False
                 elif resp.status_code == 408:
                     self.xl.set_status("[시각오류]")
-                    print("[오류] 타임스탬프 오류(408) — PC 시각 동기화 필요")
+                    logger.error("타임스탬프 오류(408) — PC 시각 동기화 필요")
                     return False
                 else:
                     self.xl.set_status(f"[서버오류{resp.status_code}]")
-                    print(f"[오류] 서버 {resp.status_code} (시도{attempt}/3)")
+                    try:
+                        body = resp.json()
+                        detail = body.get("detail") or body.get("error") or str(body)
+                    except Exception:
+                        detail = resp.text[:200] if resp.text else "(응답 없음)"
+                    logger.warning("서버 %d (시도%d/3) — 원인: %s", resp.status_code, attempt, detail)
 
             except requests.exceptions.ConnectionError:
                 self.xl.set_status("[연결오류]")
-                print(f"[오류] 네트워크 연결 실패 (시도{attempt}/3)")
+                logger.warning("네트워크 연결 실패 (시도%d/3)", attempt)
             except requests.exceptions.Timeout:
                 self.xl.set_status("[타임아웃]")
-                print(f"[오류] 타임아웃 (시도{attempt}/3)")
+                logger.warning("타임아웃 (시도%d/3)", attempt)
             except Exception as e:
                 self.xl.set_status("[오류]")
-                print(f"[오류] {e} (시도{attempt}/3)")
+                logger.error("%s (시도%d/3)", e, attempt)
 
             if attempt < 3:
                 time.sleep(5)
@@ -809,14 +1002,15 @@ class StarStockUploader:
             return
         self.tracker.check_new_day()
         now = datetime.datetime.now().strftime("%H:%M:%S")
-        print(f"\n[{now}] 돌파 감지 실행...")
+        logger.info("돌파 감지 실행...")
         confirmed = self.detect_and_update()
 
         if confirmed:
-            self.upload(confirmed)
+            notes = self._update_status_history(confirmed)
+            self.upload(confirmed, notes=notes)
         else:
             self.xl.set_status("[감시중-돌파없음]")
-            print(f"  돌파 확정 종목 없음 (기준: {self.req_cnt}캔들 연속)")
+            logger.info("돌파 확정 종목 없음 (기준: %d캔들 연속)", self.req_cnt)
 
     # ── 자동 반복 ─────────────────────────────────────
     def run_auto(self):
@@ -858,7 +1052,7 @@ class StarStockUploader:
 
         while self.running:
             if os.path.exists(stop_flag):
-                print("[자동전송] stop.flag 감지 → 안전 종료")
+                logger.info("[자동전송] stop.flag 감지 → 안전 종료")
                 try:
                     os.remove(stop_flag)
                 except OSError:
@@ -877,7 +1071,7 @@ class StarStockUploader:
             if cur_time < MARKET_OPEN:
                 # 개장 전 → 연결·DDE 예열만, 업로드 보류. 개장 임박 대비 짧게 폴링.
                 self.xl.set_status("[개장대기] 09:00 업로드 시작")
-                print(f"[{now_str}] 개장 전 대기 중 — 업로드는 09:00부터")
+                logger.info("개장 전 대기 중 — 업로드는 09:00부터")
                 wait_secs = min(mins * 60, 30)
             elif cur_time >= MARKET_CLOSE:
                 # 장마감(15:30) → F열→L열 1회 복사 후 업로드 종료
@@ -885,17 +1079,18 @@ class StarStockUploader:
                     self.copy_high_to_prev_high()
                     self._close_done_date = today
                 self.xl.set_status("[장마감] 업로드 종료")
-                print(f"[{now_str}] 장마감(15:30) 이후 — 업로드 종료")
+                logger.info("장마감(15:30) 이후 — 업로드 종료")
                 wait_secs = mins * 60
             else:
                 # 장 중(09:00~15:30) → 돌파 감지 + 업로드
-                print(f"\n[{now_str}] 돌파 감지 실행 (다음: {mins}분 후)...")
+                logger.info("돌파 감지 실행 (다음: %d분 후)...", mins)
                 confirmed = self.detect_and_update()
                 if confirmed:
-                    self.upload(confirmed)
+                    notes = self._update_status_history(confirmed)
+                    self.upload(confirmed, notes=notes, mins=mins)
                 else:
                     self.xl.set_status("[감시중-돌파없음]")
-                    print(f"  돌파 확정 종목 없음")
+                    logger.info("돌파 확정 종목 없음")
                 wait_secs = mins * 60
 
             for _ in range(wait_secs):
@@ -903,7 +1098,7 @@ class StarStockUploader:
                     break
                 time.sleep(1)
 
-        print("[자동전송] 종료")
+        logger.info("[자동전송] 종료")
 
     # ── 장마감 처리: F열(당일고가) → L열(전일고가) 복사 ──
     def copy_high_to_prev_high(self):
@@ -930,7 +1125,7 @@ class StarStockUploader:
         now = datetime.datetime.now().strftime("%H:%M:%S")
         msg = f"[장마감완료] F→L 복사 {count}종목"
         self.xl.set_status(msg)
-        print(f"[{now}] 장마감 처리: 당일고가→전일고가 복사 {count}종목")
+        logger.info("장마감 처리: 당일고가→전일고가 복사 %d종목", count)
         return count
 
     # ── 자동 반복 ─────────────────────────────────────
@@ -952,6 +1147,12 @@ def _safe_int(val):
 # 진입점
 # ─────────────────────────────────────────────────────
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="[%(asctime)s] %(levelname)s %(message)s",
+        datefmt="%H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
     parser = argparse.ArgumentParser(description="StarStock 자동 업로더 (고가돌파 필터)")
     parser.add_argument("--config", default="config.json")
     parser.add_argument("--once",  action="store_true", help="1회 감지+업로드 후 종료")
@@ -964,7 +1165,7 @@ def main():
         uploader.tracker.reset_all()
 
     def handle_stop(sig, frame):
-        print("\n[종료] 업로더 종료 중...")
+        logger.info("[종료] 업로더 종료 중...")
         uploader.stop()
         sys.exit(0)
 

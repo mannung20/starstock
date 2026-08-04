@@ -5,7 +5,7 @@
   ── [2026-07-26] 3구역 → 4구역 이식: 실운영 starstock_uploader.py 와 판정 로직 동일화 ──
   목적 : 웹의 매수적기/관망유지/손절조심(🟢🟡🔴)을 3분봉 '종가' 위치로 자동 판정·표시.
          시뮬은 실제 봉 종가로 돌려 실운영(현재가 스냅샷)과 같은 판정을 사전검증하는 것이 가치이므로,
-         경계선·구역·연속확정 규칙을 업로더와 1:1로 맞춘다.
+         경계선·구역·연속확정 규칙은 band_logic.py 공통 모듈을 통해 업로더와 공유한다.
 
   용어 (매수기준가 = 전일고가, 아래 4개 선의 기준점):
     · 매수활성화선 = 기준가×(1+breakout_ratio/100), 기본 ×1.015 — 웹에 '켜는' 문턱.
@@ -40,6 +40,8 @@ import json
 import datetime
 import requests
 import openpyxl
+from typing import Any, Dict, List, Optional, Tuple
+import band_logic
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
@@ -47,19 +49,25 @@ ENV = os.path.join(ROOT, "web", ".env.local")
 CFG = os.path.join(HERE, "config.json")
 
 
-def load_env(path):
-    d = {}
-    with open(path, encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            k, v = line.split("=", 1)
-            d[k.strip()] = v.strip().strip('"')
+# ── 유틸 ──────────────────────────────────────────────────────────────
+
+def load_env(path: str) -> Dict[str, str]:
+    d: Dict[str, str] = {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                d[k.strip()] = v.strip().strip('"')
+    except OSError as e:
+        print(f"⚠️ 환경파일 읽기 실패: {e}")
+        sys.exit(1)
     return d
 
 
-def load_cfg():
+def load_cfg() -> Dict[str, Any]:
     try:
         with open(CFG, encoding="utf-8") as f:
             return json.load(f)
@@ -67,14 +75,14 @@ def load_cfg():
         return {}
 
 
-def to_int(v):
+def to_int(v: Any) -> int:
     try:
         return int(round(float(v)))
     except Exception:
         return 0
 
 
-def _hhmm(tm):
+def _hhmm(tm: Any) -> int:
     """시간문자열('09:06:00'/'9:06'/'0906')에서 '자정 이후 분' 정수 반환. 파싱 실패 시 -1."""
     try:
         s = str(tm).strip()
@@ -89,35 +97,68 @@ def _hhmm(tm):
     return -1
 
 
-def main():
-    env = load_env(ENV)
-    supa = env["NEXT_PUBLIC_SUPABASE_URL"].rstrip("/")
-    skey = env["SUPABASE_SERVICE_ROLE_KEY"]
+# ── 연결·설정 ──────────────────────────────────────────────────────────
+
+def build_supabase_headers(env: Dict[str, str]) -> Tuple[str, Dict[str, str]]:
+    """env dict → (supa_url, 공통헤더) 튜플."""
+    try:
+        supa = env["NEXT_PUBLIC_SUPABASE_URL"].rstrip("/")
+        skey = env["SUPABASE_SERVICE_ROLE_KEY"]
+    except KeyError as e:
+        print(f"⚠️ 환경파일에 필수 키 없음: {e}")
+        sys.exit(1)
     H = {"apikey": skey, "Authorization": f"Bearer {skey}", "Content-Type": "application/json"}
+    return supa, H
 
-    # ── 감도 파라미터: 실운영 starstock_uploader.py 와 동일 키를 config.json 에서 읽어 4구역 판정 ──
+
+def load_band_params() -> Dict[str, Any]:
+    """config.json entry_price 블록 → 4구역 비율·연속캔들 수 dict 반환.
+
+    실운영(starstock_uploader.py)과 동일한 키를 읽어 시뮬 판정에 사용.
+    """
     ep = load_cfg().get("entry_price", {})
-    ratio       = float(ep.get("breakout_ratio", 1.5)) / 100       # 매수돌파%: 매수활성화선=기준가×(1+ratio)
-    upper_ratio = float(ep.get("band_upper_ratio", 2.0)) / 100     # 상한밴드%: 관망유지 경계(+)
-    lower_ratio = float(ep.get("band_lower_ratio", 2.0)) / 100     # 하한밴드%: 관심끊음 경계(−)
-    sell_ratio  = float(ep.get("sell_breakout_ratio", 1.5)) / 100  # 매도돌파%: 매도활성화선=기준가×(1−sell_ratio)
-    req      = int(ep.get("consecutive_candles", 2))               # 매수 연속캔들(활성화 확정)
-    sell_cnt = int(ep.get("sell_consecutive_candles", 2))          # 매도 연속캔들(손절조심·관심끊음 확정)
+    return {
+        "ratio":       float(ep.get("breakout_ratio", 1.5)) / 100,       # 매수활성화선 비율
+        "upper_ratio": float(ep.get("band_upper_ratio", 2.0)) / 100,     # 상한밴드 비율
+        "lower_ratio": float(ep.get("band_lower_ratio", 2.0)) / 100,     # 하한밴드 비율
+        "sell_ratio":  float(ep.get("sell_breakout_ratio", 1.5)) / 100,  # 매도활성화선 비율
+        "req":         int(ep.get("consecutive_candles", 2)),             # 매수 활성화 연속캔들 수
+        "sell_cnt":    int(ep.get("sell_consecutive_candles", 2)),        # 매도 확정 연속캔들 수
+    }
 
-    # 0) 운영정지 확인 (안전장치) ────────────────────────────────────────────
-    mc = requests.get(f"{supa}/rest/v1/site_config?key=eq.maintenance_mode&select=value",
-                      headers=H, timeout=15).json()
+
+# ── 안전장치 ───────────────────────────────────────────────────────────
+
+def check_maintenance(supa: str, H: Dict[str, str]) -> None:
+    """운영정지(maintenance_mode=true) 미확인 시 오류 출력 후 종료.
+
+    실 stocks 를 변경하므로 반드시 ON 상태여야 실행 가능.
+    """
+    try:
+        mc = requests.get(
+            f"{supa}/rest/v1/site_config?key=eq.maintenance_mode&select=value",
+            headers=H, timeout=15,
+        ).json()
+    except Exception as e:
+        print(f"⚠️ 운영정지 확인 실패 (네트워크 오류): {e}")
+        sys.exit(1)
     if not (mc and mc[0].get("value") == "true"):
         print("⚠️ 운영정지(maintenance_mode)가 OFF 입니다.")
         print("   관리자 상단바에서 [운영정지 ON] 후 다시 실행하세요. (실 stocks 를 변경하므로 필수)")
         sys.exit(1)
 
-    # 1) 입력 엑셀 로드 (A~F) ─────────────────────────────────────────────────
-    xlsm = sys.argv[1] if len(sys.argv) > 1 else input("재생할 .xlsm 경로: ").strip().strip('"')
-    print(f"■ 선택 파일: {os.path.basename(xlsm)}")
-    wb = openpyxl.load_workbook(xlsm, data_only=True, read_only=True)
+
+# ── 입력 데이터 ────────────────────────────────────────────────────────
+
+def load_candles(xlsm: str) -> List[tuple]:
+    """엑셀 A~F열(날짜·시간·시가·고가·저가·종가) 읽기 → 행 리스트 반환."""
+    try:
+        wb = openpyxl.load_workbook(xlsm, data_only=True, read_only=True)
+    except Exception as e:
+        print(f"⚠️ 엑셀 파일 열기 실패: {e}")
+        sys.exit(1)
     ws = wb.active
-    rows = []
+    rows: List[tuple] = []
     for a, b, c, d, e, close in ws.iter_rows(min_row=2, max_col=6, values_only=True):
         if a in (None, "") or close in (None, ""):
             continue
@@ -125,23 +166,34 @@ def main():
     if not rows:
         print("데이터 없음(A~F 비어있음).")
         sys.exit(1)
+    return rows
 
-    # 2) 날짜 선택 (여러날 대응) ───────────────────────────────────────────────
+
+def select_date(rows: List[tuple]) -> str:
+    """rows 에서 날짜 목록 추출 → 사용자 선택 또는 최신 날짜 자동 선택."""
     dates = sorted({r[0] for r in rows})
     if len(dates) > 1:
         print("가능한 날짜:", ", ".join(dates))
         sel = input(f"재생할 날짜 선택 (엔터=최신 {dates[-1]}): ").strip() or dates[-1]
     else:
         sel = dates[0]
-    day = sorted([r for r in rows if r[0] == sel], key=lambda r: (r[0], r[1]))  # 시간 오름차순
-    # 09:00(장 시작)부터 재생 — 09시 이전(장전) 캔들 제외. 시간 파싱 실패분(-1)은 안전하게 유지.
+    return sel
+
+
+def filter_candles(rows: List[tuple], sel: str) -> List[tuple]:
+    """선택 날짜 필터 + 시간 오름차순 정렬 + 09:00 이전(장전) 캔들 제거."""
+    day = sorted([r for r in rows if r[0] == sel], key=lambda r: (r[0], r[1]))
     before = len(day)
+    # 09시(540분) 이전 캔들 제외. 파싱 실패(-1)는 안전하게 유지.
     day = [r for r in day if not (0 <= _hhmm(r[1]) < 9 * 60)]
     skipped = before - len(day)
     note = f" (09시 이전 {skipped}개 제외)" if skipped else ""
     print(f"재생 날짜={sel}, 캔들 {len(day)}개 · 09:00부터{note}")
+    return day
 
-    # 3) 콘솔 입력 (종목코드·전일고가·rank) ────────────────────────────────────
+
+def prompt_stock_inputs(xlsm: str) -> Tuple[str, str, int, int]:
+    """종목코드·종목명·전일고가·rank 대화형 입력 → (code, name, prev_high, rank) 반환."""
     code = input("종목코드(6자리): ").strip()
     if len(code) != 6 or not code.isdigit():
         print("종목코드는 6자리 숫자여야 합니다.")
@@ -149,71 +201,112 @@ def main():
     name = input("종목명(엔터=파일명 사용): ").strip() or os.path.splitext(os.path.basename(xlsm))[0]
     prev_high = to_int(input("전일고가(매수기준가): ").strip())
     rank = int(input("rank(엔터=1): ").strip() or "1")
-    # ── 4개 경계선 산출 (실운영과 동일하게 int() 절삭) ──
-    entry      = prev_high                          # 매수기준가 = 전일고가
-    act_line   = int(entry * (1 + ratio))           # 매수활성화선(웹에 켜는 문턱)
-    upper_band = int(entry * (1 + upper_ratio))      # 상한밴드(관망유지 경계)
-    sell_line  = int(entry * (1 - sell_ratio))       # 매도활성화선(손절조심 켜는 선)
-    lower_band = int(entry * (1 - lower_ratio))      # 하한밴드(관심끊음 경계)
-    print(f"밴드: 기준가={entry}  매수활성화선(×{1 + ratio:.3f})={act_line}  상한(×{1 + upper_ratio:.3f})={upper_band}")
-    print(f"      매도활성화선(×{1 - sell_ratio:.3f})={sell_line}  하한(×{1 - lower_ratio:.3f})={lower_band}")
-    print(f"  활성화: 종가≥매수활성화선 {req}캔들 연속 → 4구역 판정 시작")
-    print(f"  활성화 후 → 상한초과:🟡관망유지 / 매도활성화선~상한:🟢매수적기 /")
-    print(f"             하한~매도활성화선(sell {sell_cnt}캔들 확정):🔴손절조심 / 하한미만(확정):⚫관심끊음(웹숨김)")
+    return code, name, prev_high, rank
 
-    # 4) 스냅샷 + 재생 시작 id (clock-free 태깅) ──────────────────────────────
-    snap = requests.get(f"{supa}/rest/v1/stocks?stock_code=eq.{code}&select=*", headers=H, timeout=15).json()
-    existed = bool(snap)
-    last = requests.get(f"{supa}/rest/v1/buy_signals?select=id&order=id.desc&limit=1",
-                        headers=H, timeout=15).json()
-    start_id = last[0]["id"] if last else 0
 
-    # 5) 캔들 재생 ─────────────────────────────────────────────────────────────
-    #    활성화(연속 N캔들 종가≥매수활성화선) 전에는 웹 미표시(대기, 콘솔만).
-    #    활성화 후 4구역: 상한초과=🟡관망유지 / 매도활성화선~상한=🟢매수적기 /
-    #                    하한~매도활성화선(확정)=🔴손절조심 / 하한미만(확정)=⚫관심끊음(웹숨김).
-    #    손절조심·관심끊음은 매도활성화선 아래 sell_cnt 연속 확정돼야 적용(1캔들 이탈은 매수적기 유지=깜빡임 방지).
-    #    ★속도개선: status 가 바뀌는 순간(또는 마지막 캔들)만 Supabase 전송.
-    consec = 0        # 매수활성화선 위 연속 카운트(활성화 전용)
-    down = 0          # 매도활성화선 아래 연속 카운트(손절조심·관심끊음 확정용)
+def compute_bands(entry: int, ratio: float, upper_ratio: float,
+                  lower_ratio: float, sell_ratio: float) -> Tuple[int, int, int, int]:
+    """전일고가(entry) + 비율 4종 → (매수활성화선, 상한밴드, 매도활성화선, 하한밴드) 반환.
+
+    실운영(starstock_uploader.py)과 동일하게 int() 절삭 적용.
+    """
+    act_line   = int(entry * (1 + ratio))        # 매수활성화선: 기준가×(1+ratio)
+    upper_band = int(entry * (1 + upper_ratio))  # 상한밴드: 관망유지 경계
+    sell_line  = int(entry * (1 - sell_ratio))   # 매도활성화선: 손절조심 켜는 선
+    lower_band = int(entry * (1 - lower_ratio))  # 하한밴드: 관심끊음 경계
+    return act_line, upper_band, sell_line, lower_band
+
+
+# ── Supabase 조작 ──────────────────────────────────────────────────────
+
+def take_snapshot(supa: str, H: Dict[str, str], code: str) -> Tuple[List, int]:
+    """재생 전 현재 stocks 행 스냅샷 + buy_signals 최대 id 기록.
+
+    Returns:
+        (snap, start_id) — snap 은 원복용, start_id 는 신규 신호 태깅 범위 산정용.
+    """
+    try:
+        snap: List = requests.get(
+            f"{supa}/rest/v1/stocks?stock_code=eq.{code}&select=*",
+            headers=H, timeout=15,
+        ).json()
+        last: List = requests.get(
+            f"{supa}/rest/v1/buy_signals?select=id&order=id.desc&limit=1",
+            headers=H, timeout=15,
+        ).json()
+    except Exception as e:
+        print(f"⚠️ 스냅샷 취득 실패: {e}")
+        sys.exit(1)
+    start_id: int = last[0]["id"] if last else 0
+    return snap, start_id
+
+
+def _make_mark(status: str, cur: int, entry: int, down: int, sell_cnt: int) -> str:
+    """status → 콘솔 출력용 mark 문자열 생성 (시뮬 전용).
+
+    buy 두 종류 구분: down==0이면 sell_line 위(plain 매수적기),
+                     down>0이면 sell_line 아래 미확정(매수적기 유지).
+    """
+    if status == "hold":
+        return f"🟡 관망유지 +{(cur / entry - 1) * 100:.1f}%"
+    if status == "buy":
+        if down > 0:
+            return f"🟢 매수적기 유지 ({down}/{sell_cnt})"
+        return "🟢 매수적기"
+    if status == "cutoff":
+        return "⚫ 관심끊음"
+    return "🔴 손절조심"
+
+
+def _print_band_header(act_line: int, upper_band: int, sell_line: int, lower_band: int) -> None:
+    """캔들 재생 전 4개 경계선을 박스로 1회 출력. 이후 루프에서 반복 표시 불필요."""
+    border = "═" * 62
+    print(f"  {border}")
+    print(f"  ⚫ 하한 {lower_band:,}   │   🔴 매도 {sell_line:,}"
+          f"   │   🟢 활성화 {act_line:,}   │   🟡 상한 {upper_band:,}")
+    print(f"  {border}")
+
+
+def replay_candles(supa: str, H: Dict[str, str], day: List[tuple],
+                   code: str, name: str, entry: int, rank: int,
+                   act_line: int, upper_band: int, sell_line: int,
+                   lower_band: int, req: int, sell_cnt: int) -> None:
+    """캔들 배열 순차 재생 → Supabase upsert (status 전환 시 또는 마지막 캔들만).
+
+    활성화(연속 req 캔들 종가≥매수활성화선) 전에는 웹 미전송(콘솔 대기 표시만).
+    """
+    consec = 0       # 매수활성화선 위 연속 카운트 (활성화 확정 전용)
+    down = 0         # 매도활성화선 아래 연속 카운트 (손절조심·관심끊음 확정용)
     activated = False
-    prev_status = None
+    prev_status: Optional[str] = None
     sent = 0
     last_i = len(day) - 1
     up_headers = {**H, "Prefer": "resolution=merge-duplicates"}
+    _print_band_header(act_line, upper_band, sell_line, lower_band)
+
     for i, (dt, tm, o, h, l, close) in enumerate(day):
         cur = to_int(close)
 
-        # ── 활성화 판정: 종가 ≥ 매수활성화선(기준가×1.015) 이 req캔들 연속 ──
+        # ── 활성화 판정: 종가 ≥ 매수활성화선이 req캔들 연속 ──
         if not activated:
             consec = consec + 1 if cur >= act_line else 0
             if consec >= req:
                 activated = True
+                print(f"  {tm}   {cur:>8,}   ✅ 활성화 확정! ({req}/{req}) → 4구역 판정 시작")
             else:
-                # 아직 돌파 확정 전 → 대기(웹 미전송, 콘솔만 표시)
-                print(f"  {tm}  종가={cur:>7}  대기(확정까지 {max(0, req - consec)}캔들)  "
-                      f"연속={consec}/{req}  (매수활성화선={act_line})")
+                print(f"  {tm}   {cur:>8,}   ⏳ 대기 {consec}/{req}")
                 continue
 
-        # ── 활성화됨 → 4구역 판정 (실운영 starstock_uploader.py 와 동일) ──
+        # ── 활성화됨 → 4구역 판정 (band_logic 공통 모듈) ──
         down = down + 1 if cur < sell_line else 0
-        down_confirmed = down >= sell_cnt
-        if cur > upper_band:
-            status, mark = "hold", f"🟡관망유지(이미상승 +{(cur / entry - 1) * 100:.1f}%)"
-        elif cur >= sell_line:
-            status, mark = "buy", "🟢매수적기"
-        elif not down_confirmed:
-            status, mark = "buy", f"🟢매수적기 유지(매도활성화선 이탈 {down}/{sell_cnt})"
-        elif cur < lower_band:
-            status, mark = "cutoff", "⚫관심끊음(웹숨김)"
-        else:
-            status, mark = "sell", "🔴손절조심"
+        status = band_logic.determine_status(cur, upper_band, sell_line, lower_band, down, sell_cnt)
+        mark = _make_mark(status, cur, entry, down, sell_cnt)
 
-        # 전환(또는 마지막 캔들)일 때만 전송
+        # status 전환 시(또는 마지막 캔들)만 Supabase 전송 — 불필요한 upsert 최소화
         do_send = (status != prev_status) or (i == last_i)
         if do_send:
-            visible = (status != "cutoff")                        # 관심끊음 → 웹숨김(실운영 숨김마커와 동일 효과)
-            db_status = "sell" if status == "cutoff" else status  # DB status(buy/hold/sell) 보호: 관심끊음은 숨김+sell 저장
+            visible = (status != "cutoff")                       # 관심끊음 → 웹숨김
+            db_status = "sell" if status == "cutoff" else status  # DB는 buy/hold/sell 3종만 저장
             row = {
                 "stock_code": code, "stock_name": name, "current_price": cur,
                 "open_price": to_int(o), "high_price": to_int(h), "low_price": to_int(l),
@@ -221,33 +314,107 @@ def main():
                 "status": db_status, "rank": rank, "is_visible": visible,
                 "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             }
-            requests.post(f"{supa}/rest/v1/stocks?on_conflict=stock_code",
-                          headers=up_headers, json=row, timeout=15)
-            sent += 1
+            try:
+                requests.post(
+                    f"{supa}/rest/v1/stocks?on_conflict=stock_code",
+                    headers=up_headers, json=row, timeout=15,
+                )
+                sent += 1
+            except Exception as e:
+                print(f"  ⚠️ upsert 실패 ({tm}): {e}")
+
         prev_status = status
-        tag = "→전송" if do_send else "  ·유지"
-        print(f"  {tm}  종가={cur:>7}  [매도활성화선{sell_line}~상한{upper_band}]  {mark}{tag}")
-    print(f"  (Supabase 전송 {sent}회 — status 전환 시에만 upsert)")
+        tag = "→ 전송" if do_send else "  · 유지"
+        print(f"  {tm}   {cur:>8,}   {mark}  {tag}")
 
-    # 6) 재생 신호 [replay] 태깅 (start_id 이후 새 신호만) ─────────────────────
-    tagged = requests.patch(
-        f"{supa}/rest/v1/buy_signals?id=gt.{start_id}&note=is.null",
-        headers={**H, "Prefer": "return=representation"},
-        json={"note": "[replay]"}, timeout=15,
-    ).json()
-    print(f"\n재생 신호 [replay] 태깅: {len(tagged) if isinstance(tagged, list) else 0}건")
+    print(f"\n  총 {len(day)}캔들 · 전송 {sent}회")
 
-    # 7) 확인 → 원복 ──────────────────────────────────────────────────────────
+
+def tag_replay_signals(supa: str, H: Dict[str, str], start_id: int) -> None:
+    """start_id 이후 새로 생성된 buy_signals 에 note='[replay]' 태깅."""
+    try:
+        tagged = requests.patch(
+            f"{supa}/rest/v1/buy_signals?id=gt.{start_id}&note=is.null",
+            headers={**H, "Prefer": "return=representation"},
+            json={"note": "[replay]"}, timeout=15,
+        ).json()
+        print(f"\n재생 신호 [replay] 태깅: {len(tagged) if isinstance(tagged, list) else 0}건")
+    except Exception as e:
+        print(f"⚠️ [replay] 태깅 실패: {e}")
+
+
+def restore_stock(supa: str, H: Dict[str, str], code: str, snap: List) -> None:
+    """재생 종료 후 stocks 를 재생 전 상태로 원복.
+
+    재생 전 종목이 없었으면 삭제, 있었으면 스냅샷 행으로 PATCH 복원.
+    """
+    try:
+        if snap:
+            orig = dict(snap[0])
+            orig.pop("id", None)  # id는 서버 자동관리 — PATCH 시 제외
+            requests.patch(
+                f"{supa}/rest/v1/stocks?stock_code=eq.{code}",
+                headers=H, json=orig, timeout=15,
+            )
+            print("stocks 원복 완료(스냅샷 복원).")
+        else:
+            requests.delete(f"{supa}/rest/v1/stocks?stock_code=eq.{code}", headers=H, timeout=15)
+            print("재생용 임시 종목 삭제 완료.")
+    except Exception as e:
+        print(f"⚠️ stocks 원복 실패 — 수동으로 확인하세요: {e}")
+
+
+# ── 진입점 ─────────────────────────────────────────────────────────────
+
+def main() -> None:
+    env = load_env(ENV)
+    supa, H = build_supabase_headers(env)
+    bp = load_band_params()
+
+    # 0) 운영정지 확인 (안전장치)
+    check_maintenance(supa, H)
+
+    # 1) 입력 엑셀 로드 (A~F)
+    xlsm = sys.argv[1] if len(sys.argv) > 1 else input("재생할 .xlsm 경로: ").strip().strip('"')
+    print(f"■ 선택 파일: {os.path.basename(xlsm)}")
+    rows = load_candles(xlsm)
+
+    # 2) 날짜 선택 + 09:00 이전 캔들 제거
+    sel = select_date(rows)
+    day = filter_candles(rows, sel)
+
+    # 3) 콘솔 입력 + 4개 경계선 산출
+    code, name, prev_high, rank = prompt_stock_inputs(xlsm)
+    entry = prev_high  # 매수기준가 = 전일고가
+    act_line, upper_band, sell_line, lower_band = compute_bands(
+        entry, bp["ratio"], bp["upper_ratio"], bp["lower_ratio"], bp["sell_ratio"]
+    )
+    print(f"밴드: 기준가={entry}  매수활성화선(×{1 + bp['ratio']:.3f})={act_line}"
+          f"  상한(×{1 + bp['upper_ratio']:.3f})={upper_band}")
+    print(f"      매도활성화선(×{1 - bp['sell_ratio']:.3f})={sell_line}"
+          f"  하한(×{1 - bp['lower_ratio']:.3f})={lower_band}")
+    print(f"  활성화: 종가≥매수활성화선 {bp['req']}캔들 연속 → 4구역 판정 시작")
+    print(f"  활성화 후 → 상한초과:🟡관망유지 / 매도활성화선~상한:🟢매수적기 /")
+    print(f"             하한~매도활성화선(sell {bp['sell_cnt']}캔들 확정):🔴손절조심"
+          f" / 하한미만(확정):⚫관심끊음(웹숨김)")
+
+    # 4) 스냅샷 + 재생 시작 id (원복·태깅 범위 산정용)
+    snap, start_id = take_snapshot(supa, H, code)
+
+    # 5) 캔들 재생
+    replay_candles(
+        supa, H, day, code, name, entry, rank,
+        act_line, upper_band, sell_line, lower_band,
+        bp["req"], bp["sell_cnt"],
+    )
+
+    # 6) 재생 신호 [replay] 태깅
+    tag_replay_signals(supa, H, start_id)
+
+    # 7) 확인 → stocks 원복
     print("=== 관리자 /admin/signals 에서 [재생] 배지로 확인하세요 ===")
     input("확인 후 Enter → stocks 원복 진행...")
-    if existed:
-        orig = snap[0]
-        orig.pop("id", None)
-        requests.patch(f"{supa}/rest/v1/stocks?stock_code=eq.{code}", headers=H, json=orig, timeout=15)
-        print("stocks 원복 완료(스냅샷 복원).")
-    else:
-        requests.delete(f"{supa}/rest/v1/stocks?stock_code=eq.{code}", headers=H, timeout=15)
-        print("재생용 임시 종목 삭제 완료.")
+    restore_stock(supa, H, code, snap)
     print("마무리: 관리자 [재생신호 일괄삭제]로 [replay] 제거 → 운영정지 OFF.")
 
 

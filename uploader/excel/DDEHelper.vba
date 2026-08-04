@@ -118,6 +118,122 @@ Public Sub FillDDEFormulasSafe()
     DdeLog "FillDDESafe 완료 · 제공사=" & IIf(kiwoom, "키움", "LS") & " · filled=" & filled & " · 기입후 #N/A=" & CountNA(ws, LastDataRow(ws))
 End Sub
 
+' 1-2) 배열 일괄 기입 버전 (FillDDEFormulasSafe 대체)
+'  선택1-A ScreenUpdating + Calculation Manual: 기입 중 재계산/화면갱신 차단
+'  선택2-B LS + 키움 둘 다 Range.Formula = 배열: COM 호출 ~500 → 10회 감소
+'  선택3-A HasFormula 체크 유지: 기존 수식 있는 셀 보존
+Public Sub FillDDEFormulasArraySafe()
+    Dim ws As Worksheet
+    Dim kiwoom As Boolean, filled As Long
+    Dim prevAlerts As Boolean, prevCalc As Long, prevScreen As Boolean
+    Dim rowCount As Long, r As Long, idx As Long
+    Dim code As String, kb As String, lb As String
+
+    Set ws = ThisWorkbook.Sheets(MASTER_SHEET)
+    kiwoom = UseKiwoom()
+    rowCount = DATA_END_ROW - DATA_START_ROW + 1   ' = 100
+
+    ' ── 1단계: 수식 배열 구성 (메모리, 빠름) ──────────────────────────────
+    Dim fD() As Variant, fE() As Variant, fF() As Variant
+    Dim fG() As Variant, fL() As Variant, fN() As Variant
+    ReDim fD(1 To rowCount, 1 To 1): ReDim fE(1 To rowCount, 1 To 1)
+    ReDim fF(1 To rowCount, 1 To 1): ReDim fG(1 To rowCount, 1 To 1)
+    ReDim fL(1 To rowCount, 1 To 1): ReDim fN(1 To rowCount, 1 To 1)
+
+    For r = DATA_START_ROW To DATA_END_ROW
+        idx = r - DATA_START_ROW + 1
+        code = Trim(CStr(ws.Cells(r, 2).Value))
+        If Len(code) = 6 And IsNumeric(code) Then
+            If kiwoom Then
+                kb = "=NKRun|'" & code & "_AL'!'"
+                fD(idx, 1) = kb & "10'"  : fE(idx, 1) = kb & "16'"
+                fF(idx, 1) = kb & "17'"  : fG(idx, 1) = kb & "18'"
+                fL(idx, 1) = kb & "377'" : fN(idx, 1) = kb & "12'"
+            Else
+                lb = "=EtkDS|eds!'STOCK." & code & ";"
+                fD(idx, 1) = lb & "현재가'" : fE(idx, 1) = lb & "시가'"
+                fF(idx, 1) = lb & "고가'"   : fG(idx, 1) = lb & "저가'"
+                fN(idx, 1) = lb & "등락율'"
+            End If
+            filled = filled + 1
+        End If
+    Next r
+
+    ' ── 2단계: 화면·계산 억제 (기입 중 DDE 응답 대기 차단) ──────────────
+    prevAlerts = Application.DisplayAlerts
+    prevCalc   = Application.Calculation
+    prevScreen = Application.ScreenUpdating
+    Application.DisplayAlerts  = False
+    Application.Calculation    = xlCalculationManual
+    Application.ScreenUpdating = False
+    On Error Resume Next
+
+    ' ── 3단계: 열별 일괄 기입 ─────────────────────────────────────────────
+    DdeFillCol ws, 4,  fD   ' D: 현재가
+    DdeFillCol ws, 5,  fE   ' E: 시가
+    DdeFillCol ws, 6,  fF   ' F: 고가
+    DdeFillCol ws, 7,  fG   ' G: 저가
+    DdeFillCol ws, 14, fN   ' N: 등락율
+
+    If kiwoom Then
+        ' 키움 L열(전일고가): 항상 덮어쓰기 (HasFormula 체크 없음, 기존 동작 유지)
+        ws.Range(ws.Cells(DATA_START_ROW, 12), ws.Cells(DATA_END_ROW, 12)).Formula = fL
+    Else
+        ' LS: 키움→LS 전환 잔재 수식만 제거 (정적값 보존)
+        For r = DATA_START_ROW To DATA_END_ROW
+            If ws.Cells(r, 12).HasFormula Then ws.Cells(r, 12).ClearContents
+        Next r
+    End If
+    On Error GoTo 0
+
+    ' ── 4단계: 억제 해제 → DDE 비동기 갱신 시작 ────────────────────────────
+    Application.Calculation    = prevCalc    ' Auto 복원 → DDE 자동갱신 비동기 시작
+    Application.ScreenUpdating = prevScreen
+    DoEvents    ' DisplayAlerts=False 유지한 채 메시지 루프 처리
+                ' → 키움 100채널 동시 DDE_INITIATE 시 "데이터 원본 선택" 다이얼로그 억제
+    Application.DisplayAlerts  = prevAlerts  ' DoEvents 완료 후 복원
+    ' [제거] Application.Calculate: 동기 블로킹(LS 2~4초/키움 5~10초) 제거
+    '        prevCalc=Auto 복원만으로 DDE 갱신 시작, EnsureDDEReady가 #N/A 후속 처리
+
+    ws.Range("N10").Value = "등락률"
+    ws.Range(STATUS_CELL).Value = "[DDE기입완료(" & filled & "/" & IIf(kiwoom, "키움", "LS") & ")]"
+    DdeLog "FillDDEArraySafe 완료 · 제공사=" & IIf(kiwoom, "키움", "LS") & " · filled=" & filled
+    ' [제거] & CountNA(...): 로그용 1000~1200번 COM 호출(1~2초) 제거, EnsureDDEReady가 처리
+End Sub
+
+' DdeFillCol: 열 단위 배열 기입 헬퍼
+'  기존 수식(= 로 시작) 있는 셀 → 유지 (HasFormula 동등)
+'  수식 없는 셀 + 새 수식 있음 → 신규 기입
+'  빈 행(종목코드 없음) → 기존 상태 유지
+Private Sub DdeFillCol(ws As Worksheet, ByVal col As Long, ByRef newFmls As Variant)
+    Dim rowCount As Long
+    rowCount = DATA_END_ROW - DATA_START_ROW + 1
+
+    Dim rng As Range
+    Set rng = ws.Range(ws.Cells(DATA_START_ROW, col), ws.Cells(DATA_END_ROW, col))
+
+    Dim existing As Variant
+    existing = rng.Formula          ' 1회 읽기 (100셀 → Range 호출 1번)
+
+    Dim merged() As Variant
+    ReDim merged(1 To rowCount, 1 To 1)
+
+    Dim i As Long, exVal As String, nfVal As String
+    For i = 1 To rowCount
+        exVal = CStr(existing(i, 1))
+        nfVal = CStr(newFmls(i, 1))
+        If Left(exVal, 1) = "=" Then
+            merged(i, 1) = exVal    ' 기존 수식 유지
+        ElseIf nfVal <> "" Then
+            merged(i, 1) = nfVal    ' 수식 없는 셀에 신규 기입
+        Else
+            merged(i, 1) = exVal    ' 빈 행 또는 값 유지
+        End If
+    Next i
+
+    rng.Formula = merged            ' 1회 쓰기 (100셀 → Range 호출 1번)
+End Sub
+
 ' 2) #N/A 셀만 재요청 + 값 채워질 때까지 폴링
 Public Sub EnsureDDEReady()
     Dim ws As Worksheet, r As Long, lastRow As Long, t0 As Double
@@ -126,7 +242,8 @@ Public Sub EnsureDDEReady()
     lastRow = LastDataRow(ws)
     If lastRow < DATA_START_ROW Then Exit Sub
     cols = DdeCols()
-    DdeLog "EnsureDDE 시작 · #N/A=" & CountNA(ws, lastRow) & " (행 11~" & lastRow & ")"
+    DdeLog "EnsureDDE 시작 (행 11~" & lastRow & ")"
+    ' [제거] & CountNA(...): 시작 로그용 1000~1200번 COM 호출(1~2초) 제거
     t0 = Timer
     Do
         naNow = 0
@@ -224,7 +341,7 @@ End Sub
 Public Sub StartDDEThenSort()
     DdeLog "===== 시작 시퀀스 (제공사=" & IIf(UseKiwoom(), "키움", "LS") & " · 장중=" & IsMarketHours() & ") ====="
     SetupProviderCheckbox
-    FillDDEFormulasSafe
+    FillDDEFormulasArraySafe    ' 배열 일괄 기입 (FillDDEFormulasSafe 대체)
     EnsureDDEReady
     StartMarketSort       ' 정렬 1회(항상) + 장중(09:00~15:30)에만 반복
     ' [2026-07-28 자동복원] 업로더 자동시작 (파이썬이 개장대기·stop.flag로 자기게이트라 안전)

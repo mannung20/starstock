@@ -159,8 +159,12 @@ export function SignalsManager({
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
-              {["종목", "발생시각(KST)", "매수기준가", "발생가", "순위", "비고", ""].map((c) => (
-                <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">{c}</th>
+              {([
+                { h: "종목" }, { h: "발생시각(KST)" },
+                { h: "매수기준가", r: true }, { h: "발생가", r: true }, { h: "순위", r: true },
+                { h: "비고" }, { h: "" },
+              ] as { h: string; r?: boolean }[]).map(({ h, r }, i) => (
+                <th key={i} className={`whitespace-nowrap px-3 py-2 font-medium${r ? " text-right" : ""}`}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -172,9 +176,9 @@ export function SignalsManager({
                   <span className="text-xs text-muted-foreground">{s.stock_code}</span>
                 </td>
                 <td className="px-3 py-2 tabular-nums text-muted-foreground">{fmtDateTime(s.signaled_at)}</td>
-                <td className="px-3 py-2 tabular-nums">{formatKRW(s.entry_price)}</td>
-                <td className="px-3 py-2 tabular-nums">{formatKRW(s.signal_price)}</td>
-                <td className="px-3 py-2 tabular-nums text-muted-foreground">{s.rank ?? "-"}</td>
+                <td className="px-3 py-2 tabular-nums text-right">{formatKRW(s.entry_price)}</td>
+                <td className="px-3 py-2 tabular-nums text-right">{formatKRW(s.signal_price)}</td>
+                <td className="px-3 py-2 tabular-nums text-right text-muted-foreground">{s.rank ?? "-"}</td>
                 <td className="px-3 py-2">
                   {s.note === "[replay]" && (
                     <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-700">재생</span>
