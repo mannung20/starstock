@@ -74,6 +74,7 @@ const config: Config = {
       },
     },
   },
+  safelist: ["text-right"],
   plugins: [require("tailwindcss-animate")],
 };
 
