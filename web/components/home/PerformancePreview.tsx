@@ -65,8 +65,10 @@ export function PerformancePreview({
         <table className="w-full min-w-[520px] text-left text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
-              {["종목", "마감일", "수익률", "결과", "비고"].map((c) => (
-                <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">{c}</th>
+              {([
+                { h: "종목" }, { h: "마감일" }, { h: "수익률", r: true }, { h: "결과" }, { h: "비고" },
+              ] as { h: string; r?: boolean }[]).map(({ h, r }, i) => (
+                <th key={i} className={`whitespace-nowrap px-3 py-2 font-medium${r ? " text-right" : ""}`}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -80,7 +82,7 @@ export function PerformancePreview({
                     <div className="text-xs text-muted-foreground">{r.stock_code}</div>
                   </td>
                   <td className="px-3 py-2 tabular-nums text-muted-foreground">{r.close_date ?? "-"}</td>
-                  <td className={`px-3 py-2 font-semibold tabular-nums ${returnTone(r.return_rate)}`}>
+                  <td className={`px-3 py-2 font-semibold tabular-nums text-right ${returnTone(r.return_rate)}`}>
                     {r.signal_id != null && <span className="mr-1 text-xs font-normal text-muted-foreground">최고</span>}
                     {formatPercent(r.return_rate)}
                   </td>

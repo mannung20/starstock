@@ -66,8 +66,10 @@ export function SignalHistory({
         <table className="w-full min-w-[420px] text-left text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
-              {["종목", "발생시각", "매수기준가"].map((c) => (
-                <th key={c} className="whitespace-nowrap px-3 py-2 font-medium">{c}</th>
+              {([
+                { h: "종목" }, { h: "발생시각" }, { h: "매수기준가", r: true },
+              ] as { h: string; r?: boolean }[]).map(({ h, r }, i) => (
+                <th key={i} className={`whitespace-nowrap px-3 py-2 font-medium${r ? " text-right" : ""}`}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -79,7 +81,7 @@ export function SignalHistory({
                   <div className="text-xs text-muted-foreground">{s.stock_code}</div>
                 </td>
                 <td className="px-3 py-2 tabular-nums text-muted-foreground">{timeAgo(s.signaled_at)}</td>
-                <td className="px-3 py-2 tabular-nums font-semibold">{formatKRW(s.entry_price)}</td>
+                <td className="px-3 py-2 tabular-nums font-semibold text-right">{formatKRW(s.entry_price)}</td>
               </tr>
             ))}
           </tbody>
