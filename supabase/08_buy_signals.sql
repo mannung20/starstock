@@ -53,7 +53,7 @@ create trigger trg_log_buy_signal_ins
   for each row execute function public.log_buy_signal();
 
 -- ── RLS ──────────────────────────────────────────────────────────────────
--- ★공개 SELECT 는 실운영 신호(note is null)만 허용 → 재생([replay]) 은 anon 미노출(DB 레벨 안전망).
+-- ★ 공개 SELECT 는 실운영 신호(note is null)만 허용 → 재생([replay]) 은 anon 미노출(DB 레벨 안전망).
 --   관리자(서버 admin client = service_role)는 RLS 우회로 전체 조회/삭제/재생-태깅.
 --   INSERT/UPDATE/DELETE 정책 없음 → service_role 전용(트리거는 security definer 로 기록).
 alter table public.buy_signals enable row level security;

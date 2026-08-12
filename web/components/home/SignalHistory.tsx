@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { formatKRW } from "@/lib/utils";
+import { formatAchieved } from "@/lib/signal-performance";
 import type { BuySignalRow } from "@/lib/types";
 
 /** 발생시각 → "N분 전" 상대 표기(KST 무관, 경과시간 기준). */
@@ -67,7 +68,7 @@ export function SignalHistory({
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
               {([
-                { h: "종목" }, { h: "발생시각" }, { h: "매수기준가", r: true },
+                { h: "종목" }, { h: "발생시각" }, { h: "매수기준가", r: true }, { h: "달성률", r: true },
               ] as { h: string; r?: boolean }[]).map(({ h, r }, i) => (
                 <th key={i} className={`whitespace-nowrap px-3 py-2 font-medium${r ? " text-right" : ""}`}>{h}</th>
               ))}
@@ -82,6 +83,12 @@ export function SignalHistory({
                 </td>
                 <td className="px-3 py-2 tabular-nums text-muted-foreground">{timeAgo(s.signaled_at)}</td>
                 <td className="px-3 py-2 tabular-nums font-semibold text-right">{formatKRW(s.entry_price)}</td>
+                <td className="px-3 py-2 tabular-nums text-right">
+                  {s.finalized
+                    ? <span className="font-semibold text-up">{formatAchieved(s.max_pct)}</span>
+                    : <span className="text-muted-foreground text-xs">추적 중 {s.max_pct > 0 ? `+${s.max_pct.toFixed(1)}%` : ""}</span>
+                  }
+                </td>
               </tr>
             ))}
           </tbody>

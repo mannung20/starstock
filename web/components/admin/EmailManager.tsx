@@ -9,6 +9,7 @@ const KIND_LABEL: Record<EmailKind, string> = {
   referral_reward: "추천보상",
   vip_expiry: "VIP만료",
   feedback: "기능개선요청",
+  signup_notify: "신규가입알림",
   test: "테스트",
   other: "기타",
 };

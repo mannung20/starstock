@@ -13,7 +13,7 @@ export function LoginLockedCard({ rank }: { rank: number }) {
           <span className="font-bold text-foreground">#{rank}</span> 로그인하면 무료 공개
         </div>
         <Link href="/login" className={buttonVariants({ size: "sm" })}>
-          구글로 로그인
+          구글 로그인
         </Link>
       </CardContent>
     </Card>

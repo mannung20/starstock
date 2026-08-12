@@ -98,7 +98,7 @@ export function StockTable({ slots, role }: { slots: Slot[]; role: ViewerRole })
                 <tr key={`login-${slot.rank}`} className="border-b bg-secondary/40">
                   <td colSpan={cols.length} className="px-3 py-3 text-center text-sm">
                     🔒 로그인하면 {loginCount}개 종목 더 무료 공개{" "}
-                    <Link href="/login" className={buttonVariants({ size: "sm", className: "ml-2" })}>구글로 로그인</Link>
+                    <Link href="/login" className={buttonVariants({ size: "sm", className: "ml-2" })}>구글 로그인</Link>
                   </td>
                 </tr>
               );

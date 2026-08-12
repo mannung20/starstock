@@ -12,7 +12,7 @@ alter table public.buy_signals
   add column if not exists max_price      integer      not null default 0,  -- 최고 표본가(참고)
   add column if not exists max_at         timestamptz,                       -- 최고 도달 시각
   add column if not exists tracking_until timestamptz,                       -- 추적창 종료 = min(신호+60분, 당일15:30 KST)
-  add column if not exists finalized      boolean      not null default false; -- 추적 종료 확정
+  add column if not exists finalized      boolean      not null default false; -- 최고달성률 확정(finalize)
 
 -- ── (2) 활성 신호 조회 인덱스 (부분 인덱스: 추적 SELECT 대상만) ─────────────
 --   서버 추적 쿼리 = WHERE finalized=false AND note is null → 활성행만 인덱싱해 효율↑
@@ -55,4 +55,4 @@ end; $$ language plpgsql security definer;
 
 -- ── RLS 참고 ───────────────────────────────────────────────────────────────
 -- 신규 컬럼은 기존 buy_signals_public_read(note is null) 정책으로 함께 공개됨.
--- 서버/관리자는 service_role(RLS 우회)로 UPDATE(추적 갱신·finalize) 수행.
+-- 서버/관리자는 service_role(RLS 우회)로 UPDATE(max_pct 갱신·최고달성률 확정(finalize)) 수행.

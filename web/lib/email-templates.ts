@@ -94,6 +94,30 @@ export function featureRequestEmail(opts: {
   };
 }
 
+/** 신규 회원 가입 알림 → 관리자 (최초 로그인 시, best-effort). */
+export function newSignupEmail(opts: {
+  userEmail: string;
+  displayName?: string | null;
+  joinedAt: string;
+  adminUrl: string;
+}): EmailContent {
+  const rows = [
+    ["이메일", esc(opts.userEmail)],
+    ...(opts.displayName ? [["이름", esc(opts.displayName)]] : []),
+    ["가입시각", esc(opts.joinedAt)],
+  ]
+    .map(([k, v]) => `<tr><td style="padding:4px 12px 4px 0;color:#71717a;white-space:nowrap;vertical-align:top">${k}</td><td style="padding:4px 0;font-weight:600">${v}</td></tr>`)
+    .join("");
+  return {
+    subject: `[${SITE}] 신규 회원 가입 — ${esc(opts.userEmail)}`,
+    html: layout(
+      "신규 회원이 가입했습니다",
+      `<table style="width:100%;border-collapse:collapse">${rows}</table>`,
+      { label: "회원 관리 페이지", url: opts.adminUrl }
+    ),
+  };
+}
+
 /** 추천 보상 지급 알림 (p4-6) */
 export function referralRewardEmail(opts: { name?: string; rewardDays: number; reason: string; siteUrl: string }): EmailContent {
   const who = opts.name ? `${opts.name}님` : "회원님";

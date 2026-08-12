@@ -62,7 +62,7 @@ export default async function HomePage() {
           <div className="container">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-secondary/50 px-4 py-3 text-sm">
               <span>🔔 무료 로그인하면 {freeCount}개 종목이 즉시 공개됩니다</span>
-              <Link href="/login" className={buttonVariants({ size: "sm" })}>구글로 로그인</Link>
+              <Link href="/login" className={buttonVariants({ size: "sm" })}>구글 로그인</Link>
             </div>
           </div>
         )}

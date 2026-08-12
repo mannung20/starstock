@@ -13,17 +13,14 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * 자동 최고달성률(max_pct) 추적 — PRD v3 자동수익률이력기록 rev3, 7절.
- * stocks upsert(=트리거가 buy_signals 생성) 직후 호출해, 활성 신호마다 이번 주기
- * 현재가로 최고달성률을 누적하고 만료 신호를 finalize 한다.
+ * 자동 최고달성률(max_pct) 추적.
+ * 💬 stocks upsert(트리거로 buy_signals 생성) 직후 호출. 활성 신호마다 현재가로
+ *    max_pct 를 누적하고 만료 신호의 최고달성률을 확정(finalize)한다.
  *
- * 핵심 규칙:
- *  - 추적대상 SELECT = finalized=false AND note is null (만료조건 넣지 않음: 만료 확정을
- *    루프 안에서 처리해야 마지막 표본·finalize 누락이 없음. 부분인덱스 idx_buy_signals_active).
- *  - 만료(now>=tracking_until) → finalized=true 후 skip(이후 갱신 중단).
- *  - max_pct 갱신은 ★조건부 UPDATE(.lt("max_pct", pct)) → 동시/재시도에도 낮은값이 높은값을
- *    못 덮음(단조 최댓값 원자 보장, PRD 11 멱등의 실제 근거). 앞의 if 는 헛 write 감소용 게이트.
- *  - entry_price<=0 방어(0나눗셈 skip), top-10 이탈 종목은 이번 표본 skip(max_pct 유지).
+ * ※ 추적 대상: finalized=false AND note is null (부분인덱스 idx_buy_signals_active).
+ *    만료 확정은 루프 안에서 처리 — SELECT 에 만료 필터 넣지 않음(마지막 표본 누락 방지).
+ * ★ max_pct 갱신 = 조건부 UPDATE(.lt("max_pct", pct)) → 단조 최댓값 원자 보장(재시도 안전).
+ * ※ entry_price ≤ 0 은 0나눗셈이므로 skip. top-10 이탈 종목은 이번 표본 skip(max_pct 유지).
  */
 /** ISO timestamp → KST 날짜(YYYY-MM-DD). recommend_date/close_date 매핑용. */
 function kstDate(iso: string): string {
@@ -52,10 +49,8 @@ async function trackBuySignals(
     .select("id, stock_code, stock_name, entry_price, max_pct, max_price, signaled_at, tracking_until")
     .eq("finalized", false)
     .is("note", null)
-    .not("tracking_until", "is", null); // 09 적용 이전 레거시 행(추적창 null)은 추적 제외
-  // (미래안전: 마이그레이션 전 note-null 신호가 있었다면 tracking_until 이 없어 만료판정이
-  //  불가 → 영구 추적됨. 기능시대 신호는 트리거가 항상 tracking_until 을 세팅하므로 이 필터로
-  //  안전 분리. 현재 데이터는 전부 replay 라 note 필터로도 이미 제외됨.)
+    .not("tracking_until", "is", null); // ※ 레거시 행(tracking_until=null) 제외 — 기능 시대 이전 신호는
+  // 트리거 미작동으로 추적창이 없어 영구추적될 수 있음. 안전망.
   if (error) throw error;
   if (!active || active.length === 0) return { updated: 0, finalized: 0, promoted: 0 };
 
@@ -67,10 +62,10 @@ async function trackBuySignals(
   let promoted = 0;
 
   for (const sig of active) {
-    // 만료 → finalize 확정(루프 안에서 처리). tracking_until 은 timestamptz 문자열이라
+    // 만료 → 최고달성률 확정(finalize)(루프 안에서 처리). tracking_until 은 timestamptz 문자열이라
     // 포맷·정밀도 차이가 있으므로 문자열 비교 대신 Date.parse 로 시각 비교.
     if (sig.tracking_until && Date.parse(sig.tracking_until) <= now) {
-      // ★조건부 자동 승격(브릿지): finalize '전에' 수행(L2 크래시안전). 조건 통과 시
+      // ★ 조건부 자동 승격(브릿지): 최고달성률 확정(finalize) '전에' 수행(L2 크래시안전). 조건 통과 시
       //   stock_history 로 1건 복사. 멱등: 부분 UNIQUE(signal_id) 위반(23505)은 이미
       //   승격된 것 → 무시. (부분 인덱스는 upsert onConflict 추론 불가 → insert+catch 방식.)
       if (
@@ -115,7 +110,7 @@ async function trackBuySignals(
       .from("buy_signals")
       .update({ max_pct: pct, max_price: cur, max_at: nowIso })
       .eq("id", sig.id)
-      .lt("max_pct", pct)                          // ★조건부: 단조 최댓값 원자 보장
+      .lt("max_pct", pct)                          // ★ 조건부: 단조 최댓값 원자 보장
       .select("id");
     if (upErr) throw upErr;
     if (patched && patched.length > 0) updated++;

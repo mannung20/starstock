@@ -382,6 +382,14 @@ Public Sub ClearDDEFormulas()
         If ws.Cells(i, 14).HasFormula Then
             ws.Cells(i, 14).ClearContents
         End If
+        ' L(전일고가) DDE 수식 삭제 (키움 모드에서 기입됨, 정적값은 보존)
+        If ws.Cells(i, 12).HasFormula Then
+            ws.Cells(i, 12).ClearContents
+        End If
+        ' J(추천상태) 텍스트 삭제 (매수적기/관망유지 등 - 닫을 때 초기화)
+        If ws.Cells(i, 10).Value <> "" Then
+            ws.Cells(i, 10).ClearContents
+        End If
     Next i
 
     If cleared > 0 Then

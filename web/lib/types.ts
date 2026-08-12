@@ -152,7 +152,7 @@ export type BuySignalRow = {
   max_price: number;            // 최고 표본가(참고) integer
   max_at: string | null;        // 최고 도달 시각 timestamptz
   tracking_until: string | null;// 추적창 종료 = min(신호+60분, 당일15:30 KST)
-  finalized: boolean;           // 추적 종료 확정
+  finalized: boolean;           // 최고달성률 확정(finalize)
 }
 
 export type RewardType = "milestone" | "repeat" | "referee" | "manual";
@@ -175,7 +175,7 @@ export type ReferralRewardRow = {
   rewarded_at: string;
 }
 
-export type EmailKind = "grade_change" | "referral_reward" | "vip_expiry" | "feedback" | "test" | "other";
+export type EmailKind = "grade_change" | "referral_reward" | "vip_expiry" | "feedback" | "signup_notify" | "test" | "other";
 export type EmailStatus = "sent" | "skipped" | "failed";
 // 06_email_logs.sql — 이메일 발송 로그 (관리자 확인용, 발송 본문 전문 저장)
 export type EmailLogRow = {

@@ -44,8 +44,10 @@ export const getViewer = cache(
     } = await supabase.auth.getUser();
     if (!user) return { userId: null, email: null, role: "guest" };
 
-    const { data } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
-    const role = ((data as { role: UserRole } | null)?.role) ?? "free";
+    const { data } = await supabase.from("profiles").select("role, is_banned").eq("id", user.id).maybeSingle();
+    const profile = data as { role: UserRole; is_banned: boolean } | null;
+    if (profile?.is_banned) return { userId: null, email: null, role: "guest" };
+    const role = profile?.role ?? "free";
     return { userId: user.id, email: user.email ?? null, role };
   },
 );

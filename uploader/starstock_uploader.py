@@ -72,7 +72,7 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════
 # 파일 구조 목차
 # ──────────────────────────────────────────────────────────────
-#  [상수]           STATUS_MAP / REVERSE_STATUS / CUTOFF_LABEL / _STATUS_KR
+#  [상수]           STATUS_MAP(미사용·승인대기) / REVERSE_STATUS / CUTOFF_LABEL / _STATUS_KR
 #  [헬퍼함수]       load_config / _disp_w / _pad / _safe_int
 #  [진단헬퍼]       _admin_level / _admin_text / _diag_log / _diag_scan / _com_retry
 #  [Excel COM]      _find_open_workbook(116줄) — COM 연결 탐색 3단계 로직
@@ -94,7 +94,10 @@ except ImportError:
 #  [진입점]         main()
 # ══════════════════════════════════════════════════════════════
 
-STATUS_MAP   = {"매수적기": "buy", "관망유지": "hold", "손절조심": "sell"}   # (구)J열 읽기용·현재 미사용
+# ⚠️ [미사용·승인대기] 구 J열 수동 드롭다운 읽기용 상수. 현재 코드 어디에도 참조 없음.
+# → 삭제 승인 시 이 줄 + 목차의 STATUS_MAP 항목 함께 제거.
+# → 유지할 이유(예: 향후 복원 가능성)가 있으면 그 이유를 이 주석에 기재.
+STATUS_MAP   = {"매수적기": "buy", "관망유지": "hold", "손절조심": "sell"}
 REVERSE_STATUS = {"buy": "매수적기", "hold": "관망유지", "sell": "손절조심"}    # 밴드 자동판정 → J열 기입용
 CUTOFF_LABEL = "관심끊음"   # 하한밴드 미만(너무 하락) → 웹숨김 + J열 표기
 
@@ -963,6 +966,8 @@ class StarStockUploader:
                     self.xl.set_status(msg)
                     kst_now = (datetime.datetime.utcnow() + datetime.timedelta(hours=9)).strftime("%H:%M:%S")
                     self._print_upload_result(visible, hidden, notes, mins=mins, kst_now=kst_now)
+                    tr = resp.json().get("tracked", {})
+                    _diag_log(f"[tracked] updated={tr.get('updated',0)} finalized={tr.get('finalized',0)} promoted={tr.get('promoted',0)}")
                     return True
                 elif resp.status_code == 401:
                     self.xl.set_status("[토큰오류]")

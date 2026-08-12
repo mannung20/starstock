@@ -208,7 +208,33 @@ export function SiteManager({ config }: { config: Record<string, string> }) {
               <p className="text-xs text-muted-foreground">
                 ※ 매수기준가 조건(돌파율/연속봉)은 site_config 제외 → uploader/config.json 직접 편집 후 Python 재시작
               </p>
-              <Button onClick={() => save(["guest_visible_count", "free_visible_count", "upload_interval_default"])} disabled={saving}>저장</Button>
+
+              <div className="rounded-md border p-3 space-y-3">
+                <p className="text-sm font-medium">신규 가입 알림</p>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={bool("notify_admin_on_signup")}
+                    onChange={(e) => set("notify_admin_on_signup", String(e.target.checked))}
+                  />
+                  신규 회원 첫 로그인 시 알림 이메일 발송
+                </label>
+                <Field label="알림 받을 이메일 주소">
+                  <input
+                    type="email"
+                    className={inputCls}
+                    placeholder="admin@example.com"
+                    value={val("notify_admin_email")}
+                    onChange={(e) => set("notify_admin_email", e.target.value)}
+                  />
+                </Field>
+                <p className="text-xs text-muted-foreground">
+                  ※ 체크 해제 시 이메일을 입력해도 발송되지 않습니다.<br />
+                  ※ 이메일 provider(Resend 또는 Gmail)가 설정된 경우에만 실제 발송됩니다.
+                </p>
+              </div>
+
+              <Button onClick={() => save(["guest_visible_count", "free_visible_count", "upload_interval_default", "notify_admin_on_signup", "notify_admin_email"])} disabled={saving}>저장</Button>
             </>
           )}
 

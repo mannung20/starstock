@@ -262,24 +262,46 @@ Public Sub EnsureDDEReady()
         DoEvents
         Application.Wait Now + TimeSerial(0, 0, 1)
     Loop While Timer - t0 < MAX_WAIT_SEC
-    Dim leftover As String, cnt As Long
-    leftover = "": cnt = 0
+    Dim leftover As String, cnt As Long, refCnt As Long
+    Dim hasNA As Boolean, hasRef As Boolean
+    leftover = "": cnt = 0: refCnt = 0
     For r = DATA_START_ROW To lastRow
+        hasNA = False: hasRef = False
         For Each c In cols
             Set cel = ws.Cells(r, c)
             If cel.HasFormula Then
                 If Application.IsNA(cel.Value) Then
-                    leftover = leftover & CStr(ws.Cells(r, 2).Value) & "(" & r & "행) "
-                    cnt = cnt + 1
-                    Exit For
+                    hasNA = True
+                ElseIf IsError(cel.Value) Then
+                    If cel.Value = CVErr(xlErrRef) Then hasRef = True
                 End If
             End If
         Next c
+        If hasNA Then
+            leftover = leftover & CStr(ws.Cells(r, 2).Value) & "(" & r & "행) "
+            cnt = cnt + 1
+        End If
+        If hasRef And Not hasNA Then refCnt = refCnt + 1
     Next r
-    If cnt = 0 Then
-        DdeLog "EnsureDDE 종료 · 전부 정상"
+
+    Dim elapsed As String
+    elapsed = Format(Timer - t0, "0.0") & "초"
+    Dim totalStocks As Long
+    totalStocks = lastRow - DATA_START_ROW + 1
+
+    If cnt = 0 And refCnt = 0 Then
+        DdeLog "EnsureDDE 종료 · 전부 정상 (" & elapsed & ")"
     Else
-        DdeLog "EnsureDDE 종료 · 미해결=" & cnt & " -> " & leftover & "(거래정지/미인식 가능)"
+        Dim reason As String, refMsg As String
+        If cnt >= CLng(totalStocks * 0.9) Then
+            reason = "DDE서버 미응답(NKRun 미준비/UAC불일치) 가능성"
+        Else
+            reason = "거래정지/미인식 가능"
+        End If
+        refMsg = ""
+        If refCnt > 0 Then refMsg = " · #REF!=" & refCnt & "(UAC불일치 또는 수식오류)"
+        DdeLog "EnsureDDE 종료 · 미해결(#N/A)=" & cnt & refMsg & " · 경과=" & elapsed & " · " & reason
+        If Len(leftover) > 0 Then DdeLog "  미해결종목: " & leftover
     End If
 End Sub
 

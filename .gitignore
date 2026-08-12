@@ -42,6 +42,7 @@ web/tsconfig.tsbuildinfo
 # ===== 내부 작업노트/로컬 스크립트 (커밋 제외, 루트만) =====
 /*.txt
 /*.bat
+/prd-*.json 
 
 # ===== OS =====
 .DS_Store

@@ -41,6 +41,7 @@ export function Header({
   const [supabase] = useState(() => createClient());
   const [role, setRole] = useState<UserRole | "guest">(initialRole);
   const [email, setEmail] = useState<string | null>(initialEmail);
+  const [displayName, setDisplayName] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState<boolean>(initialIsAdmin);
   const [unread, setUnread] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -74,16 +75,25 @@ export function Header({
       if (!session?.user) {
         setRole("guest");
         setEmail(null);
+        setDisplayName(null);
         setIsAdmin(false);
         return;
       }
       setEmail(session.user.email ?? null);
+      setDisplayName((session.user.user_metadata?.full_name as string | undefined) ?? null);
       const { data } = await supabase
         .from("profiles")
-        .select("role")
+        .select("role, is_banned")
         .eq("id", session.user.id)
         .maybeSingle();
-      setRole(((data as { role: UserRole } | null)?.role) ?? "free");
+      const profile = data as { role: UserRole; is_banned: boolean } | null;
+      if (profile?.is_banned) {
+        await supabase.auth.signOut(); // 즉시 클라이언트 세션 파기 → SIGNED_OUT 이벤트 재발화
+        return;
+      }
+      const userRole = profile?.role ?? "free";
+      setRole(userRole);
+      setIsAdmin(userRole === "admin");
     });
     return () => sub.subscription.unsubscribe();
   }, [supabase]);
@@ -105,7 +115,7 @@ export function Header({
     router.refresh();
   }
 
-  const shortEmail = email ? email.replace(/@.*/, "@…") : null;
+  const displayIdentifier = displayName ?? (email ? email.replace(/@.*/, "@…") : null);
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur">
@@ -148,7 +158,7 @@ export function Header({
                   </span>
                 )}
               </Link>
-              <span className="hidden text-xs text-muted-foreground sm:inline">{shortEmail}</span>
+              <span className="max-w-[80px] truncate text-xs text-muted-foreground sm:max-w-none">{displayIdentifier}</span>
               {isAdmin && (
                 <Link
                   href="/admin"

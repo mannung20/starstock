@@ -4,9 +4,44 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidRefCode } from "@/lib/referral";
 import { sendEmail } from "@/lib/email";
-import { referralRewardEmail } from "@/lib/email-templates";
+import { referralRewardEmail, newSignupEmail } from "@/lib/email-templates";
 
 type GrantedReward = { user: string; days: number; reason: string };
+
+/**
+ * 신규 가입(최초 로그인) 시 관리자에게 알림 메일 발송.
+ * created_at이 60초 이내면 신규 가입으로 판정.
+ * site_config의 notify_admin_on_signup=true 일 때만 발송 (best-effort).
+ */
+async function notifyAdminOnNewSignup(
+  user: { email: string | null; created_at: string; user_metadata?: Record<string, unknown> },
+  siteUrl: string
+): Promise<void> {
+  const diffMs = Date.now() - new Date(user.created_at).getTime();
+  if (diffMs >= 60_000) return; // 기존 회원 → 건너뜀
+
+  const admin = createAdminClient();
+  const { data: cfgRows } = await admin
+    .from("site_config")
+    .select("key, value")
+    .in("key", ["notify_admin_on_signup", "notify_admin_email"]);
+  const cfg = Object.fromEntries(
+    ((cfgRows ?? []) as { key: string; value: string }[]).map((r) => [r.key, r.value])
+  );
+
+  if (cfg.notify_admin_on_signup !== "true") return;
+  const adminEmail = (cfg.notify_admin_email ?? "").trim();
+  if (!adminEmail) return;
+
+  const kst = new Date(user.created_at).toLocaleString("ko-KR", { timeZone: "Asia/Seoul" });
+  const tpl = newSignupEmail({
+    userEmail: user.email ?? "알 수 없음",
+    displayName: user.user_metadata?.full_name as string | undefined,
+    joinedAt: `${kst} (KST)`,
+    adminUrl: `${siteUrl}/admin/users`,
+  });
+  await sendEmail({ to: adminEmail, subject: tpl.subject, html: tpl.html, kind: "signup_notify" });
+}
 
 /**
  * p4-6: process_referral 이 반환한 이번 지급 보상(granted)을 수혜자에게 이메일 알림.
@@ -66,6 +101,21 @@ export async function GET(req: NextRequest) {
   const { searchParams, origin } = new URL(req.url);
   const code = searchParams.get("code");
   const next = searchParams.get("next") ?? "/";
+  const errorParam = searchParams.get("error");
+  const errorCode = searchParams.get("error_code");
+
+  // OAuth 에러(user_banned, access_denied 등) → 팝업/일반 플로우 분기
+  if (errorParam) {
+    const msg =
+      errorCode === "user_banned"
+        ? "차단된 계정입니다. 관리자에게 문의하세요."
+        : (searchParams.get("error_description")?.replace(/\+/g, " ") ?? errorParam);
+    // 팝업 플로우: popup-close 에 에러 전달 → postMessage 로 부모에게 전파 후 닫힘
+    if (next === "/auth/popup-close") {
+      return NextResponse.redirect(`${origin}/auth/popup-close?error=${encodeURIComponent(msg)}`);
+    }
+    return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent(msg)}`);
+  }
 
   const refCode = cookies().get("ref")?.value;
 
@@ -78,12 +128,18 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // 추천 처리: ref 쿠키 + 로그인 사용자 → RPC (self/중복/차단은 RPC 내부에서 검증)
-    if (isValidRefCode(refCode)) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user) {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (user) {
+      // 신규 가입 알림 (best-effort — 로그인 흐름을 막지 않음)
+      try {
+        await notifyAdminOnNewSignup({ ...user, email: user.email ?? null }, origin);
+      } catch { /* 발송 실패 무시 */ }
+
+      // 추천 처리: ref 쿠키 + 로그인 사용자 → RPC (self/중복/차단은 RPC 내부에서 검증)
+      if (isValidRefCode(refCode)) {
         try {
           const admin = createAdminClient();
           const { data: rpcData } = await admin.rpc("process_referral", {
