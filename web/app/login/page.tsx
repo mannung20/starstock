@@ -28,6 +28,8 @@ export default function LoginPage() {
       options: {
         redirectTo: `${location.origin}/auth/callback?next=/auth/popup-close`,
         skipBrowserRedirect: true,
+        // ★핵심: 계정이 여러 개일 때 항상 계정 선택 화면을 띄운다(자동 로그인 방지)
+        queryParams: { prompt: "select_account" },
       },
     });
 
@@ -47,7 +49,10 @@ export default function LoginPage() {
     if (!popup) {
       await supabase.auth.signInWithOAuth({
         provider: "google",
-        options: { redirectTo: `${location.origin}/auth/callback` },
+        options: {
+          redirectTo: `${location.origin}/auth/callback`,
+          queryParams: { prompt: "select_account" },
+        },
       });
       return;
     }
