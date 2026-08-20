@@ -86,7 +86,7 @@ export function SignalHistory({
                 <td className="px-3 py-2 tabular-nums text-right">
                   {s.finalized
                     ? <span className="font-semibold text-up">{formatAchieved(s.max_pct)}</span>
-                    : <span className="text-muted-foreground text-xs">추적 중 {s.max_pct > 0 ? `+${s.max_pct.toFixed(1)}%` : ""}</span>
+                    : <span className="text-muted-foreground text-xs">추적 중 {Number(s.max_pct) > 0 ? `+${Number(s.max_pct).toFixed(1)}%` : ""}</span>
                   }
                 </td>
               </tr>

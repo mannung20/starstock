@@ -14,7 +14,10 @@ export const TRACK_WINDOW_MS = 60 * 60 * 1000;
  * (4-3 <1% 분기: 숫자 t 유무로 병기 문구를 갈라야 함)
  */
 export function bucketValue(pct: number): number | null {
-  for (const t of BUCKET_THRESHOLDS) if (pct >= t) return t;
+  // ⚠️ numeric→문자열 런타임 값 대비 Number 강제(문자열 비교 오판·throw 방지).
+  const n = Number(pct);
+  if (!Number.isFinite(n)) return null;
+  for (const t of BUCKET_THRESHOLDS) if (n >= t) return t;
   return null;
 }
 
@@ -23,10 +26,12 @@ export function bucketValue(pct: number): number | null {
  * bucketValue 가 null(=<1%)이면 '(1% 미만)', 아니면 '(최대 t%달성)'.
  */
 export function formatAchieved(pct: number): string {
-  const t = bucketValue(pct);
+  const n = Number(pct);
+  const shown = Number.isFinite(n) ? n.toFixed(1) : "-";
+  const t = bucketValue(n);
   return t != null
-    ? `${pct.toFixed(1)}% (최대 ${t}%달성)`
-    : `${pct.toFixed(1)}% (1% 미만)`;
+    ? `${shown}% (최대 ${t}%달성)`
+    : `${shown}% (1% 미만)`;
 }
 
 /** 등급 라벨만(요약/배지용): "최대 3%달성" / "1% 미만" */
@@ -75,7 +80,7 @@ export function summarize(rows: SignalPerfRow[]): SignalPerfSummary {
   const b = { g10: 0, g7: 0, g5: 0, g3: 0, g1: 0, lt1: 0 };
   let sum = 0;
   for (const r of full) {
-    sum += r.max_pct;
+    sum += Number(r.max_pct) || 0;
     switch (bucketValue(r.max_pct)) {
       case 10: b.g10++; break;
       case 7: b.g7++; break;
