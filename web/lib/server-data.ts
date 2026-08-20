@@ -64,8 +64,13 @@ export const getViewer = cache(
 export async function getStocksPayload(): Promise<StocksPayload> {
   const supabase = createClient();
   const { role } = await getViewer();
+  const admin = createAdminClient();
 
-  const { data } = await supabase.from("stocks").select("*").eq("is_visible", true).order("rank", { ascending: true });
+  // ★핵심: 관리자는 service_role(RLS 우회)로 숨김 종목까지 전체 조회 → 홈에서 '숨김' 배지로 구분.
+  //   그 외 역할: 일반 RLS 클라이언트 + 명시적 is_visible=true 이중 방어(rank>10 잔류 오산정 방지).
+  const src = role === "admin" ? admin : supabase;
+  const base = src.from("stocks").select("*").order("rank", { ascending: true });
+  const { data } = await (role === "admin" ? base.lte("rank", 10) : base.eq("is_visible", true));
   let stocks = (data ?? []) as StockRow[];
 
   // guest: 서버에서도 가격 null 처리 (RLS로 데이터는 왔지만 F12 개발자도구 우회 차단)
@@ -79,7 +84,6 @@ export async function getStocksPayload(): Promise<StocksPayload> {
     }));
   }
 
-  const admin = createAdminClient();
   const { count } = await admin
     .from("stocks")
     .select("rank", { count: "exact", head: true })

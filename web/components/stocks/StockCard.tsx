@@ -64,7 +64,11 @@ export function StockCard({ stock, role }: { stock: StockRow; role: ViewerRole }
   return (
     <Card
       className={`transition-shadow hover:shadow-md ${
-        stock.status === "buy" ? "animate-pulse border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30" : ""
+        stock.is_visible === false
+          ? "border-dashed opacity-60"                                   // 관리자에게만 오는 숨김 종목
+          : stock.status === "buy"
+            ? "animate-pulse border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30"
+            : ""
       }`}
     >
       <CardContent className="space-y-2 p-4">
@@ -72,6 +76,9 @@ export function StockCard({ stock, role }: { stock: StockRow; role: ViewerRole }
           <div className="flex items-baseline gap-2">
             <span className="text-sm font-bold text-muted-foreground">#{stock.rank}</span>
             <span className="text-base font-bold">{stock.stock_name}</span>
+            {stock.is_visible === false && (
+              <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">숨김</span>
+            )}
           </div>
           <PriceChange current={stock.current_price} open={stock.open_price} changeRate={stock.change_rate} showPrice={false} />
         </div>

@@ -11,10 +11,12 @@ Supabase Dashboard > **SQL Editor** 에서 아래 파일을 **순서대로** 붙
 | 5 | `05_referral_rpc.sql` | 추천 RPC: `process_referral`(가입 콜백 단일 트랜잭션) + `grant_vip_days`(구독 연장) + `mask_email`. 서버(service_role)만 실행 권한 |
 | … | `06_email_logs.sql` ~ `10_signal_bridge.sql` | 이메일/종목마이그레이션/매수신호/성과/승격브릿지 (각 기능별) |
 | 11 | `11_reseller.sql` | 리셀러(총판) 시스템: resellers·reseller_settlements 테이블 + profiles/subscriptions/upload_logs 컬럼 + role='reseller' + notices 'reseller' 카테고리 + site_config 10키 + RLS(`my_reseller_id`). **기존 프로젝트는 11 만 추가 Run** |
+| 12 | `12_visible_rank_config.sql` | 등급별 공개 종목 수를 site_config 와 연동: `site_config_int` 헬퍼 추가 + `visible_rank_limit()` 이 `guest_visible_count`·`free_visible_count` 를 읽도록 교체(관리자 '운영설정' 탭 반영). **기존 프로젝트는 12 만 추가 Run** |
 
 > **01~04 를 이미 실행한 기존 프로젝트는 05 만 추가로 Run** 하면 됩니다(01~04 재실행 불필요).
 > 추천 테이블/컬럼/RLS/site_config 키는 이미 01~04 에 포함, 05 는 함수만 추가합니다.
 > **11 은 전 구문 idempotent**(`if not exists`/`on conflict do nothing`) 라 재실행 안전.
+> **12 는 `create or replace` + `on conflict do nothing`** 라 재실행 안전(운영설정 개수를 실제 노출에 반영).
 > 실행 전 Supabase 백업 권장(role CHECK 변경·컬럼 추가 포함, PRD 섹션 13-5).
 
 ## 실행 후 대시보드에서 확인할 것
@@ -23,8 +25,8 @@ Supabase Dashboard > **SQL Editor** 에서 아래 파일을 **순서대로** 붙
 - [ ] **Table Editor**: 각 테이블 RLS 토글이 **ON** 인지 확인
 - [ ] **Settings > API**: `service_role` 키 복사 → Vercel 환경변수 `SUPABASE_SERVICE_ROLE_KEY` 에 입력
 
-## RLS 요약 (등급별 stocks 공개 범위)
-- 비회원(anon): `rank = 1`
-- free: `rank <= 3`
+## RLS 요약 (등급별 stocks 공개 범위)  ※12 적용 후: 개수는 관리자 '운영설정' 탭에서 조절
+- 비회원(anon): `rank <= guest_visible_count` (기본 1)
+- free / reseller: `rank <= free_visible_count` (기본 3)
 - vip / admin: 전체 (`rank <= 10`)
 - 쓰기(INSERT/UPDATE): service_role 키만 (엑셀 업로더·관리자 API 서버사이드)

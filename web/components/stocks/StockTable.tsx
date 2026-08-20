@@ -40,11 +40,20 @@ function RealRow({ stock, role }: { stock: StockRow; role: ViewerRole }) {
   return (
     <tr
       className={`border-b hover:bg-accent/40 ${
-        stock.status === "buy" ? "animate-pulse bg-emerald-50 dark:bg-emerald-950/30" : ""
+        stock.is_visible === false
+          ? "opacity-60"                                                 // 관리자에게만 오는 숨김 종목
+          : stock.status === "buy"
+            ? "animate-pulse bg-emerald-50 dark:bg-emerald-950/30"
+            : ""
       }`}
     >
       <td className="px-3 py-2 font-bold text-muted-foreground">#{stock.rank}</td>
-      <td className="px-3 py-2 font-semibold">{stock.stock_name}</td>
+      <td className="px-3 py-2 font-semibold">
+        {stock.stock_name}
+        {stock.is_visible === false && (
+          <span className="ml-1.5 rounded bg-muted px-1.5 py-0.5 text-xs font-medium text-muted-foreground">숨김</span>
+        )}
+      </td>
       <td className="px-3 py-2">
         <PriceChange current={stock.current_price} open={stock.open_price} changeRate={stock.change_rate} />
       </td>
