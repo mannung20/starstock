@@ -13,6 +13,7 @@ import {
   getNoticesPreview,
   getPerformanceData,
   getBuySignals,
+  homePerformanceWindow,
 } from "@/lib/server-data";
 import { getAdminContext } from "@/lib/admin";
 import { MaintenanceGate } from "@/components/layout/MaintenanceGate";
@@ -33,9 +34,15 @@ export default async function HomePage() {
     getBuySignals(),
   ]);
 
-  // 홈 미리보기: 수익률이 확정된(마감) 최근 종목 3개만. 관리자 설정으로 숨김 가능(기본 표시).
+  // 홈 미리보기: 수익률이 확정된(마감) 이력을, 관리자 설정(공개 기간·건수)만큼. 기본 표시.
+  //   기간=close_date(마감일) 기준, 건수=home_performance_limit(기본 3). 요약통계는 전체(perf.summary) 그대로.
   const showPerf = config.home_performance_visible !== "false";
-  const perfRows = showPerf ? perf.rows.filter((r) => r.return_rate != null).slice(0, 3) : [];
+  const { sinceYMD: perfSinceYMD, limit: perfLimit } = homePerformanceWindow(config);
+  const perfRows = showPerf
+    ? perf.rows
+        .filter((r) => r.return_rate != null && (!perfSinceYMD || (r.close_date != null && r.close_date >= perfSinceYMD)))
+        .slice(0, perfLimit)
+    : [];
 
   // 매수신호 이력: 관리자 표시설정(기본 표시) && 신호 1건 이상일 때만.
   const showSignals = config.home_signals_visible !== "false";

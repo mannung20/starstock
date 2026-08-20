@@ -450,23 +450,112 @@ function HomeVisibilityToggle({ initial }: { initial: boolean }) {
   );
 }
 
+// 홈 공개 기간 옵션(매수신호 이력과 동일 구조). 홈 미리보기 노출 범위를 뜻하는 설정.
+type PerfRange = "today" | "7d" | "30d" | "all";
+const PERF_RANGE_LABEL: Record<PerfRange, string> = {
+  today: "오늘",
+  "7d": "최근7일",
+  "30d": "최근30일",
+  all: "전체",
+};
+
+/** 홈 '수익률 현황' 미리보기 공개 범위(기간·건수) — home_performance_range/limit 저장. */
+function HomePerformanceRange({ initialRange, initialLimit }: { initialRange: string; initialLimit: number }) {
+  const [range, setRange] = useState<PerfRange>(
+    (["today", "7d", "30d", "all"].includes(initialRange) ? initialRange : "all") as PerfRange
+  );
+  const [limit, setLimit] = useState<number>(initialLimit);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    const lim = Math.min(Math.max(Math.round(limit) || 3, 1), 50);
+    setLimit(lim);
+    setSaving(true);
+    setSaved(false);
+    const res = await fetch("/api/admin/site-config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entries: { home_performance_range: range, home_performance_limit: String(lim) },
+      }),
+    });
+    setSaving(false);
+    if (res.ok) {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } else {
+      alert("공개 범위 저장에 실패했습니다.");
+    }
+  }
+
+  return (
+    <div className="rounded-lg border p-4">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="text-sm font-semibold">🏠 홈 공개 범위</span>
+        <span className="text-xs text-muted-foreground">홈 수익률 현황 미리보기에 노출할 기간·건수(마감일 기준)</span>
+      </div>
+      <div className="flex flex-wrap items-end gap-4">
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-xs text-muted-foreground">공개 기간</span>
+          <select
+            value={range}
+            onChange={(e) => setRange(e.target.value as PerfRange)}
+            className="rounded-md border px-3 py-1.5 text-sm"
+          >
+            {(["today", "7d", "30d", "all"] as PerfRange[]).map((r) => (
+              <option key={r} value={r}>{PERF_RANGE_LABEL[r]}</option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-xs text-muted-foreground">공개 건수 (1~50)</span>
+          <input
+            type="number"
+            min={1}
+            max={50}
+            value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
+            className="w-28 rounded-md border px-3 py-1.5 text-sm"
+          />
+        </label>
+        <Button onClick={save} disabled={saving}>
+          {saving ? "저장 중…" : "공개 범위 저장"}
+        </Button>
+        {saved && <span className="pb-1.5 text-xs text-emerald-600">저장됨 ✓</span>}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        현재 설정: <b>{PERF_RANGE_LABEL[range]}</b> 기간 내 최신 <b>{limit}</b>건을 홈 미리보기에 공개
+        · 공개 /history 전체 성과 페이지·요약통계는 영향 없음
+      </p>
+    </div>
+  );
+}
+
 /**
  * 수익률 현황(관리) — 단일 화면.
  * ★핵심: 자동/수동 토글 제거(2026-08). 자동 최고달성률을 주 화면으로, 수동 마감 이력은 아래 보조 섹션으로 통합.
- * 홈 표시 on/off는 두 이력 공통 게이트라 최상단으로 승격.
+ * 홈 표시 on/off·홈 공개 범위는 두 이력 공통이라 최상단으로 승격.
  */
 export function HistoryManager({
   rows,
   homeVisible,
   bridge,
+  homeRange,
+  homeLimit,
 }: {
   rows: StockHistoryRow[];
   homeVisible: boolean;
   bridge: BridgeConfig;
+  homeRange: string; // today|7d|30d|all
+  homeLimit: number; // 홈 미리보기 건수
 }) {
   return (
     <div className="space-y-8">
-      <HomeVisibilityToggle initial={homeVisible} />
+      <div className="space-y-3">
+        <HomeVisibilityToggle initial={homeVisible} />
+        <HomePerformanceRange initialRange={homeRange} initialLimit={homeLimit} />
+      </div>
 
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">🏁 자동 최고달성률</h2>

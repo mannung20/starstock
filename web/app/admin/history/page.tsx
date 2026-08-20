@@ -17,7 +17,10 @@ export default async function AdminHistoryPage() {
     admin
       .from("site_config")
       .select("key, value")
-      .in("key", ["auto_bridge_enabled", "auto_bridge_min_pct", "auto_bridge_full_only"]),
+      .in("key", [
+        "auto_bridge_enabled", "auto_bridge_min_pct", "auto_bridge_full_only",
+        "home_performance_range", "home_performance_limit",
+      ]),
   ]);
 
   // 기본값: 표시(true). 명시적으로 "false"일 때만 숨김.
@@ -33,11 +36,17 @@ export default async function AdminHistoryPage() {
     fullOnly: bmap.get("auto_bridge_full_only") !== "false",
   };
 
+  // 홈 공개 범위(관리자 설정). 미설정 시 현행 유지(전체·3건).
+  const homeRange = bmap.get("home_performance_range") ?? "all";
+  const homeLimit = Number(bmap.get("home_performance_limit") ?? "3") || 3;
+
   return (
     <HistoryManager
       rows={(data ?? []) as StockHistoryRow[]}
       homeVisible={homeVisible}
       bridge={bridge}
+      homeRange={homeRange}
+      homeLimit={homeLimit}
     />
   );
 }

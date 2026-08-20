@@ -146,6 +146,30 @@ export async function getBuySignals(): Promise<BuySignalRow[]> {
   return (data ?? []) as BuySignalRow[];
 }
 
+// ★핵심: 홈 '수익률 현황' 미리보기 공개 범위 = 관리자 설정(site_config)으로 제어.
+//   home_performance_range: today|7d|30d|all (기본 all=전체) → close_date(마감일) 기준 기간 필터
+//   home_performance_limit: 표시 건수 (기본 3, 1~50)
+// ※전제: 공개 /history(과거 전체 성과)와 요약통계는 영향 없음 — 홈 미리보기 카드에만 적용.
+export function homePerformanceWindow(config: Record<string, string>): { sinceYMD: string | null; limit: number } {
+  const range = config.home_performance_range ?? "all";
+  const limit = Math.min(Math.max(Number(config.home_performance_limit ?? "3") || 3, 1), 50);
+  return { sinceYMD: kstRangeStartYMD(range), limit };
+}
+
+// range 에 해당하는 KST 시작 날짜를 "YYYY-MM-DD" 로. close_date(DATE 컬럼) 문자열 비교용.
+// 'all'/알 수 없는 값이면 null(=기간 제한 없음). 💬 signaled_at(timestamptz)과 달리 close_date는 날짜라 ISO가 아닌 YMD로 비교.
+function kstRangeStartYMD(range: string): string | null {
+  const daysBack = range === "today" ? 0 : range === "7d" ? 6 : range === "30d" ? 29 : -1;
+  if (daysBack < 0) return null;
+  const todayKst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
+  const [y, m, d] = todayKst.split("-").map(Number);
+  const base = new Date(Date.UTC(y, m - 1, d));
+  base.setUTCDate(base.getUTCDate() - daysBack);
+  const mm = String(base.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(base.getUTCDate()).padStart(2, "0");
+  return `${base.getUTCFullYear()}-${mm}-${dd}`;
+}
+
 /** site_config 전체를 key→value 맵으로. RLS 공개 SELECT. (요청당 1회 dedupe) */
 export const getSiteConfig = cache(async (): Promise<Record<string, string>> => {
   const supabase = createClient();
