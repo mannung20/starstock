@@ -19,6 +19,7 @@
 import { cache } from "react";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getAdminContext } from "@/lib/admin";
 import type { StockRow, NoticeRow, UserRole, StockHistoryRow, BuySignalRow } from "@/lib/types";
 import type { ViewerRole } from "@/lib/stock-slots";
 
@@ -48,7 +49,11 @@ export const getViewer = cache(
     const profile = data as { role: UserRole; is_banned: boolean } | null;
     if (profile?.is_banned) return { userId: null, email: null, role: "guest" };
     const role = profile?.role ?? "free";
-    return { userId: user.id, email: user.email ?? null, role };
+    // 홈 역할 판정을 관리자 패널(getAdminContext)과 동일 기준으로 정렬:
+    //   ADMIN_EMAILS(env)·admin_whitelist 로만 관리자인 계정도 홈에서 admin 뷰(전체+숨김)로 표시.
+    //   ★핵심: profiles.role 은 건드리지 않음(free/vip 구독 등급 체계 보존).
+    const { isAdmin } = await getAdminContext();
+    return { userId: user.id, email: user.email ?? null, role: isAdmin ? "admin" : role };
   },
 );
 
