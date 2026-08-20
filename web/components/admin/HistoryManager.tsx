@@ -109,18 +109,10 @@ function AddForm({ onDone }: { onDone: () => void }) {
   );
 }
 
-/** 수동 이력(stock_history) — 기존 표. */
-function ManualView({
-  rows,
-  homeVisible,
-}: {
-  rows: StockHistoryRow[];
-  homeVisible: boolean;
-}) {
+/** 수동 마감 이력(stock_history) — 관리자가 직접 입력한 실현수익(이익/손실) 기록. */
+function ManualSection({ rows }: { rows: StockHistoryRow[] }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
-  const [showHome, setShowHome] = useState(homeVisible);
-  const [savingCfg, setSavingCfg] = useState(false);
 
   async function remove(r: StockHistoryRow) {
     if (!confirm(`${r.stock_name ?? r.stock_code} 이력을 삭제할까요?`)) return;
@@ -130,40 +122,17 @@ function ManualView({
   function done() { setAdding(false); router.refresh(); }
   const meta = (k: HistoryResult | null) => RESULTS.find((r) => r.key === k);
 
-  // 홈 화면 표시여부 토글 → site_config.home_performance_visible 저장
-  async function toggleHome(next: boolean) {
-    setShowHome(next); // 낙관적 반영
-    setSavingCfg(true);
-    const res = await fetch("/api/admin/site-config", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ entries: { home_performance_visible: next ? "true" : "false" } }),
-    });
-    setSavingCfg(false);
-    if (!res.ok) {
-      setShowHome(!next); // 실패 시 롤백
-      alert("설정 저장에 실패했습니다.");
-    }
-  }
-
   if (adding) return <AddForm onDone={done} />;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={showHome}
-            disabled={savingCfg}
-            onChange={(e) => toggleHome(e.target.checked)}
-          />
-          홈 화면에 수익률 현황 표시
-          {savingCfg && <span className="text-xs text-muted-foreground">저장 중…</span>}
-        </label>
+        <div>
+          <h2 className="text-sm font-semibold">📄 수동 마감 이력</h2>
+          <p className="text-xs text-muted-foreground">관리자가 직접 입력한 실현수익(이익/손실) 기록 · 공개 /history 및 홈 수익률 현황에 반영</p>
+        </div>
         <Button onClick={() => setAdding(true)}>+ 마감 이력 추가</Button>
       </div>
-      <p className="text-xs text-muted-foreground">공개 /history 및 홈 수익률 현황에 반영됩니다.</p>
       <div className="overflow-x-auto rounded-lg border">
         <table className="w-full min-w-[760px] text-left text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground">
@@ -452,6 +421,40 @@ function AutoView({ bridge }: { bridge: BridgeConfig }) {
 
 export type BridgeConfig = { enabled: boolean; minPct: number; fullOnly: boolean };
 
+/** 홈 '수익률 현황' 표시 on/off — 자동·수동 공통 게이트(home_performance_visible). */
+function HomeVisibilityToggle({ initial }: { initial: boolean }) {
+  const [showHome, setShowHome] = useState(initial);
+  const [savingCfg, setSavingCfg] = useState(false);
+
+  async function toggleHome(next: boolean) {
+    setShowHome(next); // 낙관적 반영
+    setSavingCfg(true);
+    const res = await fetch("/api/admin/site-config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ entries: { home_performance_visible: next ? "true" : "false" } }),
+    });
+    setSavingCfg(false);
+    if (!res.ok) {
+      setShowHome(!next); // 실패 시 롤백
+      alert("설정 저장에 실패했습니다.");
+    }
+  }
+
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <input type="checkbox" checked={showHome} disabled={savingCfg} onChange={(e) => toggleHome(e.target.checked)} />
+      홈 화면에 수익률 현황 표시
+      {savingCfg && <span className="text-xs text-muted-foreground">저장 중…</span>}
+    </label>
+  );
+}
+
+/**
+ * 수익률 현황(관리) — 단일 화면.
+ * ★핵심: 자동/수동 토글 제거(2026-08). 자동 최고달성률을 주 화면으로, 수동 마감 이력은 아래 보조 섹션으로 통합.
+ * 홈 표시 on/off는 두 이력 공통 게이트라 최상단으로 승격.
+ */
 export function HistoryManager({
   rows,
   homeVisible,
@@ -461,27 +464,18 @@ export function HistoryManager({
   homeVisible: boolean;
   bridge: BridgeConfig;
 }) {
-  const [mode, setMode] = useState<"auto" | "manual">("manual");
-
   return (
-    <div className="space-y-4">
-      {/* 자동/수동 토글 */}
-      <div className="inline-flex rounded-lg border p-0.5 text-sm">
-        <button
-          className={`rounded-md px-3 py-1.5 ${mode === "auto" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-          onClick={() => setMode("auto")}
-        >
-          자동 (최고달성률)
-        </button>
-        <button
-          className={`rounded-md px-3 py-1.5 ${mode === "manual" ? "bg-primary text-primary-foreground" : "text-muted-foreground"}`}
-          onClick={() => setMode("manual")}
-        >
-          수동 (마감 이력)
-        </button>
-      </div>
+    <div className="space-y-8">
+      <HomeVisibilityToggle initial={homeVisible} />
 
-      {mode === "auto" ? <AutoView bridge={bridge} /> : <ManualView rows={rows} homeVisible={homeVisible} />}
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold">🏁 자동 최고달성률</h2>
+        <AutoView bridge={bridge} />
+      </section>
+
+      <section className="space-y-4 border-t pt-6">
+        <ManualSection rows={rows} />
+      </section>
     </div>
   );
 }

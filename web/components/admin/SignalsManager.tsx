@@ -25,14 +25,27 @@ type Preset = "today" | "7d" | "30d" | "all" | "custom";
  * 관리자 매수신호 이력 관리: 날짜별 조회(프리셋+단일날짜) · 개별삭제 · 재생신호 일괄삭제
  * · 홈 표시여부 체크박스(home_signals_visible).
  */
+// 홈 공개 기간 옵션. 관리자 조회 프리셋과 라벨은 같지만 '홈 노출 범위'를 뜻하는 별개 설정.
+type HomeRange = "today" | "7d" | "30d" | "all";
+const HOME_RANGE_LABEL: Record<HomeRange, string> = {
+  today: "오늘",
+  "7d": "최근7일",
+  "30d": "최근30일",
+  all: "전체",
+};
+
 export function SignalsManager({
   initial,
   today,
   homeVisible,
+  homeRange,
+  homeLimit,
 }: {
   initial: BuySignalRow[];
   today: string; // KST YYYY-MM-DD
   homeVisible: boolean;
+  homeRange: string; // today|7d|30d|all
+  homeLimit: number; // 홈 표시 건수
 }) {
   const [signals, setSignals] = useState<BuySignalRow[]>(initial);
   const [preset, setPreset] = useState<Preset>("all");
@@ -40,6 +53,14 @@ export function SignalsManager({
   const [loading, setLoading] = useState(false);
   const [showHome, setShowHome] = useState(homeVisible);
   const [savingCfg, setSavingCfg] = useState(false);
+
+  // 홈 공개 범위(기간·건수) — 조회용 프리셋과 독립. '저장' 눌러야 실제 반영.
+  const [pubRange, setPubRange] = useState<HomeRange>(
+    (["today", "7d", "30d", "all"].includes(homeRange) ? homeRange : "all") as HomeRange
+  );
+  const [pubLimit, setPubLimit] = useState<number>(homeLimit);
+  const [savingPub, setSavingPub] = useState(false);
+  const [pubSaved, setPubSaved] = useState(false);
 
   const load = useCallback(async (from: string | null, to: string | null) => {
     setLoading(true);
@@ -113,6 +134,28 @@ export function SignalsManager({
     }
   }
 
+  // 홈 공개 범위(기간·건수) 저장 → home_signals_range / home_signals_limit
+  async function savePublic() {
+    const lim = Math.min(Math.max(Math.round(pubLimit) || 5, 1), 50);
+    setPubLimit(lim);
+    setSavingPub(true);
+    setPubSaved(false);
+    const res = await fetch("/api/admin/site-config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        entries: { home_signals_range: pubRange, home_signals_limit: String(lim) },
+      }),
+    });
+    setSavingPub(false);
+    if (res.ok) {
+      setPubSaved(true);
+      setTimeout(() => setPubSaved(false), 2000);
+    } else {
+      alert("공개 범위 저장에 실패했습니다.");
+    }
+  }
+
   const presetBtn = (p: Preset, label: string) => (
     <button
       onClick={() => applyPreset(p)}
@@ -135,6 +178,47 @@ export function SignalsManager({
           <Button variant="destructive" onClick={bulkDeleteReplay}>재생신호 일괄삭제</Button>
           <Button variant="destructive" onClick={bulkDeleteAll}>전체 이력 초기화</Button>
         </div>
+      </div>
+
+      {/* 홈 공개 범위(기간·건수) — 아래 조회 버튼과 별개로, 회원 홈에 실제 노출될 범위 설정 */}
+      <div className={`rounded-lg border p-4 ${showHome ? "" : "opacity-60"}`}>
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-sm font-semibold">🏠 홈 공개 범위</span>
+          <span className="text-xs text-muted-foreground">회원 홈에 노출할 매수신호 기간·건수</span>
+        </div>
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-xs text-muted-foreground">공개 기간</span>
+            <select
+              value={pubRange}
+              onChange={(e) => setPubRange(e.target.value as HomeRange)}
+              className="rounded-md border px-3 py-1.5 text-sm"
+            >
+              {(["today", "7d", "30d", "all"] as HomeRange[]).map((r) => (
+                <option key={r} value={r}>{HOME_RANGE_LABEL[r]}</option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-xs text-muted-foreground">공개 건수 (1~50)</span>
+            <input
+              type="number"
+              min={1}
+              max={50}
+              value={pubLimit}
+              onChange={(e) => setPubLimit(Number(e.target.value))}
+              className="w-28 rounded-md border px-3 py-1.5 text-sm"
+            />
+          </label>
+          <Button onClick={savePublic} disabled={savingPub}>
+            {savingPub ? "저장 중…" : "공개 범위 저장"}
+          </Button>
+          {pubSaved && <span className="pb-1.5 text-xs text-emerald-600">저장됨 ✓</span>}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">
+          현재 설정: <b>{HOME_RANGE_LABEL[pubRange]}</b> 기간 내 최신 <b>{pubLimit}</b>건을 홈에 공개
+          {!showHome && " · (지금은 '홈 표시' 꺼짐 상태라 회원에게 보이지 않습니다)"}
+        </p>
       </div>
 
       {/* 날짜별 조회 */}

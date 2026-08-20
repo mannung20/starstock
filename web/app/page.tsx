@@ -30,7 +30,7 @@ export default async function HomePage() {
     getNoticesPreview(5),
     getAdminContext(),
     getPerformanceData(),
-    getBuySignals(5),
+    getBuySignals(),
   ]);
 
   // 홈 미리보기: 수익률이 확정된(마감) 최근 종목 3개만. 관리자 설정으로 숨김 가능(기본 표시).

@@ -3,18 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-
-const ITEMS = [
-  { href: "/admin", label: "대시보드", icon: "📊", exact: true },
-  { href: "/admin/users", label: "회원관리", icon: "👥" },
-  { href: "/admin/stocks", label: "종목관리", icon: "📈" },
-  { href: "/admin/history", label: "수익률 현황", icon: "🏁" },
-  { href: "/admin/signals", label: "매수신호 이력", icon: "🔔" },
-  { href: "/admin/notices", label: "공지사항", icon: "📢" },
-  { href: "/admin/email", label: "이메일", icon: "📧" },
-  { href: "/admin/display", label: "화면설정", icon: "🖥" },
-  { href: "/admin/site", label: "사이트설정", icon: "⚙️" },
-];
+import { ADMIN_NAV_ITEMS } from "./nav-items";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -25,7 +14,7 @@ export function Sidebar() {
           <div className="font-bold">★ StarStock</div>
           <div className="text-xs font-semibold text-amber-600">ADMIN</div>
         </div>
-        {ITEMS.map((it) => {
+        {ADMIN_NAV_ITEMS.map((it) => {
           const active = it.exact ? pathname === it.href : pathname.startsWith(it.href);
           return (
             <Link

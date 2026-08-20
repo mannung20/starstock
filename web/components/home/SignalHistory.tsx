@@ -35,7 +35,7 @@ export function SignalHistory({
     let alive = true;
     const tick = async () => {
       try {
-        const res = await fetch("/api/signals?limit=5", { cache: "no-store" });
+        const res = await fetch("/api/signals", { cache: "no-store" });
         if (!res.ok) return;
         const json = (await res.json()) as { signals: BuySignalRow[] };
         if (alive && Array.isArray(json.signals)) setSignals(json.signals);

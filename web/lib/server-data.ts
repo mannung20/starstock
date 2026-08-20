@@ -104,18 +104,45 @@ export async function getStocksPayload(): Promise<StocksPayload> {
   };
 }
 
+// ★핵심: 홈 매수신호 공개 범위 = 관리자 설정(site_config)으로 제어.
+//   home_signals_range: today|7d|30d|all (기본 all=전체)  → signaled_at 기간 필터
+//   home_signals_limit: 표시 건수 (기본 5, 1~50)          → 최신 N건
+// ※전제: 관리자 페이지(매수신호 이력)에서 두 값을 저장한다. 미설정 시 현행(전체·5건)과 동일.
+export function signalsWindow(config: Record<string, string>): { sinceISO: string | null; limit: number } {
+  const range = config.home_signals_range ?? "all";
+  const limit = Math.min(Math.max(Number(config.home_signals_limit ?? "5") || 5, 1), 50);
+  return { sinceISO: kstRangeStartISO(range), limit };
+}
+
+// range 에 해당하는 KST 날짜 00:00(+09:00)을 UTC ISO 로. 'all'/알 수 없는 값이면 null(=제한 없음).
+// 💬 '오늘'=오늘 0시 이후, '최근7일'=6일 전 0시 이후 발생한 신호만 공개한다는 뜻.
+function kstRangeStartISO(range: string): string | null {
+  const daysBack = range === "today" ? 0 : range === "7d" ? 6 : range === "30d" ? 29 : -1;
+  if (daysBack < 0) return null; // all/기타 → 기간 제한 없음
+  const todayKst = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Seoul" }); // YYYY-MM-DD
+  const [y, m, d] = todayKst.split("-").map(Number);
+  const base = new Date(Date.UTC(y, m - 1, d));
+  base.setUTCDate(base.getUTCDate() - daysBack);
+  const mm = String(base.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(base.getUTCDate()).padStart(2, "0");
+  return new Date(`${base.getUTCFullYear()}-${mm}-${dd}T00:00:00+09:00`).toISOString();
+}
+
 /**
- * 매수신호 이력(공개) — 최신순 limit 건. RLS 로 실운영 신호(note is null)만 반환
+ * 매수신호 이력(공개) — 관리자 설정(기간·건수) 적용. RLS 로 실운영 신호(note is null)만 반환
  * (재생 '[replay]' 제외). 홈 SSR·폴링에서 사용.
  */
-export async function getBuySignals(limit = 5): Promise<BuySignalRow[]> {
+export async function getBuySignals(): Promise<BuySignalRow[]> {
   const supabase = createClient();
-  const { data } = await supabase
+  const { sinceISO, limit } = signalsWindow(await getSiteConfig());
+  let q = supabase
     .from("buy_signals")
     .select("*")
     .is("note", null)
     .order("signaled_at", { ascending: false })
     .limit(limit);
+  if (sinceISO) q = q.gte("signaled_at", sinceISO);
+  const { data } = await q;
   return (data ?? []) as BuySignalRow[];
 }
 
